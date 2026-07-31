@@ -32,11 +32,11 @@ Tracks implementation progress against the phased build order in `aws-graph-buil
 - [x] Fix: self-targeting `EffectivePermission` edges (e.g. "principal can attach a policy to itself") are now materialized rather than excluded — required for Phase 3 to detect self-privesc, the most common real-world technique shape
 
 ## Phase 3 — Privesc registry + IAM-only detectors
-- [ ] `privesc/registry.py` — TechniqueSpec + `@register` decorator
-- [ ] `privesc/engine.py` — runs detectors, writes PrivescPath edges + findings list
-- [ ] Seed detectors: `create_access_key`, `attach_policy` (Attach/Put family), `create_policy_version`, `update_assume_role_policy`, `add_user_to_group`, `create_login_profile`
-- [ ] Tests: hand-built small graphs per detector, including explicit-deny negative cases
-- [ ] Sandbox verification: confirm a known privesc scenario (e.g. role with `iam:CreateAccessKey` on `*`) surfaces as a finding
+- [x] `privesc/registry.py` — `TechniqueSpec`, `PrivescFinding`, `@register` decorator, `all_techniques()`
+- [x] `privesc/engine.py` — `run_privesc_detection()` runs every detector × every IamUser/IamRole principal, writes `PrivescPath` edges (discriminated by technique_id), returns findings list
+- [x] Seed detectors: `create_access_key`, `attach_policy` (Attach/Put family, deliberately includes self-targeting), `create_policy_version`, `update_assume_role_policy`, `add_user_to_group`, `create_login_profile` — all wired into `scan_cmd.py`'s output `"findings"` key
+- [x] Tests: 24 new tests (positive/negative/self-exclusion per detector, registry mechanics, multi-technique discriminator case in `test_engine.py`); 137/137 full suite passing
+- [x] Sandbox verification: **120 real findings** against the Cloudfoxable sandbox — `attach_policy` 39 (critical), `create_policy_version` 41 (high), `update_assume_role_policy` 35 (high), `create_access_key` 2 (high), `create_login_profile` 2 (high), `add_user_to_group` 1 (medium); 120/120 findings cross-checked against real `PrivescPath` edges in the graph, zero orphans
 
 ## Phase 4 — Expand resource scope
 - [ ] `regions.py` — enabled-region discovery

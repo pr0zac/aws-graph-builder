@@ -23,7 +23,8 @@ from aws_graph_builder.cache.store import CacheStore
 from aws_graph_builder.eval.engine import evaluate_iam_permissions
 from aws_graph_builder.graph.builder import build_iam_graph
 from aws_graph_builder.graph.export import graph_to_document
-from aws_graph_builder.graph.schema import EdgeType
+from aws_graph_builder.graph.schema import EdgeType, make_edge_id
+from aws_graph_builder.privesc.engine import run_privesc_detection
 from aws_graph_builder.scan.base import CachedClient
 from aws_graph_builder.scan.iam import IamScanner
 from aws_graph_builder.session import (
@@ -148,7 +149,26 @@ def scan(
             soft_wrap=True,
         )
 
+    if verbose:
+        _stdout_console.print("[dim cyan]Running privesc detection...[/dim cyan]", soft_wrap=True)
+    findings = run_privesc_detection(graph)
+    if verbose:
+        _stdout_console.print(f"[dim cyan]  found {len(findings)} finding(s)[/dim cyan]", soft_wrap=True)
+
     document = graph_to_document(graph, account_id=identity.account_id, regions_scanned=[])
+    document["findings"] = [
+        {
+            "technique_id": finding.technique_id,
+            "source": finding.source,
+            "target": finding.target,
+            "severity": finding.severity,
+            "required_permissions": finding.required_permissions,
+            "evidence_edges": finding.evidence_edges,
+            "edge_id": make_edge_id(EdgeType.PRIVESC_PATH, finding.source, finding.target, discriminator=finding.technique_id),
+            "description": finding.description,
+        }
+        for finding in findings
+    ]
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(document, default=_json_default, indent=2))
