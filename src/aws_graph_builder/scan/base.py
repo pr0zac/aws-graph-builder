@@ -102,6 +102,28 @@ class CachedClient:
     narration (e.g. "found 12 users"), so this is the single shared channel
     for both "what it's doing" (this class) and "what it's finding" (the
     scanner).
+
+    Two additional modes, both driven by reading back what a previous
+    write-through run already cached, share one `_replay_entry` helper:
+
+    - `read_only=True` (Phase 5's `rebuild`): every call is answered purely
+      from the cache -- `client` is never touched (may even be `None`) and
+      no AWS call is ever made. A cache miss is itself recorded as a
+      `ScanGap` (`error_code="NoCachedData"`) rather than silently returning
+      nothing, since "this was never scanned" is itself worth surfacing.
+    - `use_cache=True` (`scan --use-cache`, a resume mode): a cache hit is
+      returned without touching AWS; a cache miss falls through to the
+      normal live call (and gets cached normally), so an interrupted scan
+      can pick up roughly where it left off without re-fetching what it
+      already has.
+
+    In both replay paths, a cached *error* entry is always replayed as an
+    ordinary `ScanGap` -- even if it was originally a credentials-expiry
+    error -- never as a raised `CredentialsExpiredError`. There's no live
+    credential session to protect during a cache replay (this is exactly
+    what lets `rebuild` require no credentials at all), and for
+    `use_cache` specifically, blowing up on a *stale* cached expiry error
+    would defeat the purpose of a resume.
     """
 
     def __init__(
@@ -112,12 +134,16 @@ class CachedClient:
         scope: str,
         service: str,
         reporter: Callable[[str], None] | None = None,
+        read_only: bool = False,
+        use_cache: bool = False,
     ) -> None:
         self._client = client
         self._cache_store = cache_store
         self._scope = scope
         self._service = service
         self._reporter = reporter
+        self._read_only = read_only
+        self._use_cache = use_cache
         self.gaps: list[ScanGap] = []
 
     def report(self, message: str) -> None:
@@ -150,6 +176,16 @@ class CachedClient:
         """
         self.report(f"{self._service}:{operation}" + (f" ({disambiguator})" if disambiguator else ""))
         params = dict(params) if params else {}
+
+        if self._read_only or self._use_cache:
+            entry = self._cache_store.get(self._scope, self._service, operation, disambiguator=disambiguator)
+            if entry is not None:
+                return self._replay_entry(entry, operation, ignore_error_codes)
+            if self._read_only:
+                self._record_missing_cache_entry(operation, disambiguator=disambiguator)
+                return None
+            # use_cache with a miss: fall through to a live call below.
+
         method = getattr(self._client, operation)
         try:
             response = method(**params)
@@ -188,9 +224,23 @@ class CachedClient:
         Returns the merged dict, or `None` if any page's call failed (in
         which case a `ScanGap` was appended and any partial pages already
         fetched are discarded rather than cached as if complete).
+
+        `read_only`/`use_cache` replay works identically to `call()`'s --
+        pagination is invisible to the cache, which only ever sees "what did
+        this logical operation return" (see module docstring).
         """
         self.report(f"{self._service}:{operation} (paginated)")
         params = dict(params) if params else {}
+
+        if self._read_only or self._use_cache:
+            entry = self._cache_store.get(self._scope, self._service, operation, disambiguator=disambiguator)
+            if entry is not None:
+                return self._replay_entry(entry, operation, None)
+            if self._read_only:
+                self._record_missing_cache_entry(operation, disambiguator=disambiguator)
+                return None
+            # use_cache with a miss: fall through to a live call below.
+
         paginator = self._client.get_paginator(operation)
         merged: dict[str, list[Any]] = {key: [] for key in list_keys}
         try:
@@ -216,6 +266,52 @@ class CachedClient:
             disambiguator=disambiguator,
         )
         return merged
+
+    def _replay_entry(
+        self,
+        entry: CacheEntry,
+        operation: str,
+        ignore_error_codes: frozenset[str] | None,
+    ) -> dict[str, Any] | None:
+        """Answer a `call()`/`paginate()` from an already-cached entry: a
+        cached success is returned as-is, a cached error is replayed as a
+        `ScanGap` (never a raised `CredentialsExpiredError` -- see class
+        docstring) unless its code is in `ignore_error_codes`.
+        """
+        if entry.error is not None:
+            error_code = entry.error.get("code", "unknown")
+            if ignore_error_codes is not None and error_code in ignore_error_codes:
+                return None
+            self.gaps.append(
+                ScanGap(
+                    service=self._service,
+                    operation=operation,
+                    scope=self._scope,
+                    error_code=error_code,
+                    message=entry.error.get("message", ""),
+                )
+            )
+            return None
+        return entry.response
+
+    def _record_missing_cache_entry(self, operation: str, *, disambiguator: str | None) -> None:
+        """`read_only` mode, and there's no cache entry at all for this call
+        -- record that as its own kind of gap ("never scanned") rather than
+        silently returning nothing.
+        """
+        self.gaps.append(
+            ScanGap(
+                service=self._service,
+                operation=operation,
+                scope=self._scope,
+                error_code="NoCachedData",
+                message=(
+                    f"No cached response found for {self._service}:{operation}"
+                    + (f" ({disambiguator})" if disambiguator else "")
+                    + " -- this operation was never scanned into the cache."
+                ),
+            )
+        )
 
     def _record_error(
         self,
