@@ -39,17 +39,18 @@ Tracks implementation progress against the phased build order in `aws-graph-buil
 - [x] Sandbox verification: **120 real findings** against the Cloudfoxable sandbox — `attach_policy` 39 (critical), `create_policy_version` 41 (high), `update_assume_role_policy` 35 (high), `create_access_key` 2 (high), `create_login_profile` 2 (high), `add_user_to_group` 1 (medium); 120/120 findings cross-checked against real `PrivescPath` edges in the graph, zero orphans
 
 ## Phase 4 — Expand resource scope
-- [ ] `regions.py` — enabled-region discovery
-- [ ] `scan/ec2.py` — instances + instance profiles
-- [ ] `scan/lambda_.py` — functions + execution role + resource policy
-- [ ] `scan/s3.py` — buckets + bucket policy + ACL
-- [ ] `scan/organizations.py` — best-effort SCP fetch
-- [ ] Extend `graph/builder.py` for new node/edge types
-- [ ] `eval/resource_policy.py` — S3/Lambda resource policy → EffectivePermission edges
-- [ ] SCP intersection in `eval/simulator.py`
-- [ ] New detectors: `pass_role_ec2`, `pass_role_lambda`
-- [ ] Extend `cli/permissions_cmd.py` with new required actions
-- [ ] Sandbox verification: EC2/Lambda/S3 resources appear with correct trust/resource-policy edges
+- [x] `regions.py` — `discover_enabled_regions()` via `ec2:DescribeRegions`, filtered to opt-in-not-required/opted-in
+- [x] `scan/ec2.py` — instances (region-scoped; ARN construction deferred to the graph-building layer)
+- [x] `scan/lambda_.py` — functions + resource policy (`ResourceNotFoundException` treated as "no policy", not a gap, via `CachedClient`'s new `ignore_error_codes`)
+- [x] `scan/s3.py` — buckets + location + bucket policy (`NoSuchBucketPolicy` ignored) + ACL
+- [x] `scan/organizations.py` — best-effort SCP fetch, degrades gracefully to `in_organization=False` when not in an Org or lacking permission
+- [x] `graph/schema.py`/`graph/builder.py` extended: `Ec2Instance`/`LambdaFunction`/`S3Bucket`/`ServiceControlPolicy` node types, `ExecutionRole`/`AppliesSCP` edges (`AttachedTo` reused for InstanceProfile→Ec2Instance)
+- [x] `eval/resource_policy.py` — S3/Lambda resource policy → `EffectivePermission` edges, reusing principal-resolution logic refactored out of `eval/trust.py` (zero behavior change, all prior trust tests pass unchanged)
+- [x] SCP intersection in `eval/simulator.py` — same restrict-only pattern-overlap approximation as permission boundaries, plus SCP explicit-deny support
+- [x] New detectors: `pass_role_ec2`, `pass_role_lambda` — exploit the existing pattern-matching behavior (`Resource: "*"` grants for `RunInstances`/`CreateFunction` already match `IamRole` node ARNs) rather than requiring new evaluation-engine machinery
+- [x] Extended `cli/permissions_cmd.py` with all 4 new scanners' required actions + `ec2:DescribeRegions`
+- [x] `scan_cmd.py` rewritten to orchestrate: IAM (global) → EC2+Lambda (per enabled region, `--regions` override supported) → S3 (global) → Organizations (global) → evaluate → detect; `regions_scanned` in output now reflects real scanned regions; gaps aggregated across every scanner
+- [x] Sandbox verification against Cloudfoxable: real S3 buckets (8, including bucket policies), real Lambda functions (5, all with correct `ExecutionRole` edges and 3/5 with real resource policies parsed correctly — public function URLs, SNS triggers), 2310 `EffectivePermission` edges, **188 findings** (up from 120 — `pass_role_ec2`/`pass_role_lambda` alone contributed 34 each), zero dangling edges, 188/188 findings cross-checked against real `PrivescPath` edges
 
 ## Phase 5 — Cache/report/rebuild polish
 - [ ] `report.py` — ScanReport/ScanGap + companion `*.report.json` writer

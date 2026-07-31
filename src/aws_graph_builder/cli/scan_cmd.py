@@ -1,11 +1,15 @@
-"""`aws-graph-builder scan`: AWS -> disk cache -> structural IAM graph -> JSON file.
+"""`aws-graph-builder scan`: AWS -> disk cache -> attack-path graph -> JSON file.
 
-Phase 1 scope only: IAM is the only scanner wired in (no EC2/Lambda/S3/regions),
-and IAM is a global service so `regions_scanned` in the output document is
-always empty. Partial failures (denied/throttled calls) degrade gracefully per
+Scans IAM (global) plus, per enabled region, EC2 instances and Lambda
+functions, plus S3 buckets and (best-effort) Organizations SCPs (both
+global). Builds the structural graph, evaluates identity/resource/trust
+policies into `EffectivePermission`/`CanAssume`/`IdentifiesVia` edges, runs
+privesc technique detection, and writes the result as JSON.
+
+Partial failures (denied/throttled calls) degrade gracefully per
 aws-graph-builder.md: the scan still completes and writes output, with a
-console warning summary of any `ScanGap`s -- a persisted `*.report.json` file
-is explicitly a later phase.
+console warning summary of every `ScanGap` collected across every scanner --
+a persisted `*.report.json` file is explicitly a later phase.
 """
 
 from __future__ import annotations
@@ -17,16 +21,28 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
+from botocore.exceptions import ClientError
 from rich.console import Console
 
 from aws_graph_builder.cache.store import CacheStore
 from aws_graph_builder.eval.engine import evaluate_iam_permissions
-from aws_graph_builder.graph.builder import build_iam_graph
+from aws_graph_builder.graph.builder import (
+    add_ec2_instances_to_graph,
+    add_lambda_functions_to_graph,
+    add_s3_buckets_to_graph,
+    add_scp_policies_to_graph,
+    build_iam_graph,
+)
 from aws_graph_builder.graph.export import graph_to_document
 from aws_graph_builder.graph.schema import EdgeType, make_edge_id
 from aws_graph_builder.privesc.engine import run_privesc_detection
-from aws_graph_builder.scan.base import CachedClient
+from aws_graph_builder.regions import discover_enabled_regions
+from aws_graph_builder.scan.base import CachedClient, ScanGap
+from aws_graph_builder.scan.ec2 import Ec2Scanner
 from aws_graph_builder.scan.iam import IamScanner
+from aws_graph_builder.scan.lambda_ import LambdaScanner
+from aws_graph_builder.scan.organizations import OrganizationsScanner
+from aws_graph_builder.scan.s3 import S3Scanner
 from aws_graph_builder.session import (
     CredentialError,
     build_session,
@@ -66,6 +82,26 @@ def _default_cache_dir() -> Path:
     return Path.home() / ".cache" / "aws-graph-builder"
 
 
+def _resolve_target_regions(
+    enabled_regions: list[str], regions_override: str | None
+) -> list[str]:
+    """Intersect `--regions` (if given) with the enabled-regions set,
+    warning about (and dropping) any requested region that isn't enabled.
+    With no override, every enabled region is scanned.
+    """
+    if regions_override is None:
+        return enabled_regions
+
+    requested = [r.strip() for r in regions_override.split(",") if r.strip()]
+    unknown = sorted(set(requested) - set(enabled_regions))
+    if unknown:
+        _stderr_console.print(
+            f"[bold yellow]Warning:[/bold yellow] requested region(s) not enabled for this "
+            f"account, skipping: {', '.join(unknown)}"
+        )
+    return [r for r in requested if r in enabled_regions]
+
+
 def scan(
     output: Annotated[
         Path,
@@ -84,7 +120,17 @@ def scan(
     ] = None,
     region: Annotated[
         str | None,
-        typer.Option("--region", help="AWS region to use for the STS/IAM calls themselves (IAM is a global service)."),
+        typer.Option("--region", help="AWS region to use for the STS/IAM/global-service calls themselves."),
+    ] = None,
+    regions: Annotated[
+        str | None,
+        typer.Option(
+            "--regions",
+            help=(
+                "Comma-separated list of regions to scan for EC2/Lambda (e.g. us-east-1,us-west-2). "
+                "Defaults to every region enabled for the account."
+            ),
+        ),
     ] = None,
     profile: Annotated[
         str | None,
@@ -98,7 +144,7 @@ def scan(
         typer.Option("--verbose", "-v", help="Print each AWS call the scanner makes and what it finds, to stdout."),
     ] = False,
 ) -> None:
-    """Scan the AWS account's IAM resources and write a JSON attack-path graph."""
+    """Scan the AWS account and write a JSON attack-path graph."""
     # `soft_wrap=True` throughout this function's verbose output: these are
     # log-style progress lines, not prose meant to fill/wrap to the terminal
     # width -- and rich's default word-wrapping is unpredictable (and breaks
@@ -122,21 +168,73 @@ def scan(
     cache_root = (cache_dir if cache_dir is not None else _default_cache_dir()) / identity.account_id
     cache_store = CacheStore(cache_root)
 
-    iam_client = session.client("iam")
-    cached_client = CachedClient(iam_client, cache_store, scope="global", service="iam", reporter=reporter)
+    if verbose:
+        _stdout_console.print("[dim cyan]Discovering enabled regions...[/dim cyan]", soft_wrap=True)
+    try:
+        enabled_regions = discover_enabled_regions(session)
+    except ClientError as exc:
+        _stderr_console.print(
+            f"[bold yellow]Warning:[/bold yellow] failed to discover enabled regions ({exc}); "
+            "skipping EC2/Lambda scanning."
+        )
+        enabled_regions = []
+    target_regions = _resolve_target_regions(enabled_regions, regions)
+    if verbose:
+        _stdout_console.print(
+            f"[dim cyan]  scanning {len(target_regions)} region(s): {', '.join(target_regions) or '(none)'}[/dim cyan]",
+            soft_wrap=True,
+        )
 
     try:
-        result = IamScanner(cached_client).scan()
+        iam_client = CachedClient(session.client("iam"), cache_store, scope="global", service="iam", reporter=reporter)
+        iam_result = IamScanner(iam_client).scan()
+
+        ec2_results = []
+        lambda_results = []
+        for target_region in target_regions:
+            if verbose:
+                _stdout_console.print(f"[bold]Region: {target_region}[/bold]", soft_wrap=True)
+            ec2_client = CachedClient(
+                session.client("ec2", region_name=target_region),
+                cache_store,
+                scope=target_region,
+                service="ec2",
+                reporter=reporter,
+            )
+            ec2_results.append(Ec2Scanner(ec2_client, region=target_region).scan())
+
+            lambda_client = CachedClient(
+                session.client("lambda", region_name=target_region),
+                cache_store,
+                scope=target_region,
+                service="lambda",
+                reporter=reporter,
+            )
+            lambda_results.append(LambdaScanner(lambda_client, region=target_region).scan())
+
+        s3_client = CachedClient(session.client("s3"), cache_store, scope="global", service="s3", reporter=reporter)
+        s3_result = S3Scanner(s3_client).scan()
+
+        organizations_client = CachedClient(
+            session.client("organizations"), cache_store, scope="global", service="organizations", reporter=reporter
+        )
+        organizations_result = OrganizationsScanner(organizations_client, account_id=identity.account_id).scan()
     except CredentialError as exc:
         _stderr_console.print(f"[bold red]Error:[/bold red] {exc}")
         raise typer.Exit(code=1) from exc
 
     if verbose:
         _stdout_console.print("[dim cyan]Building graph from scan results...[/dim cyan]", soft_wrap=True)
-    graph = build_iam_graph(result, account_id=identity.account_id)
+    graph = build_iam_graph(iam_result, account_id=identity.account_id)
+    for ec2_result in ec2_results:
+        add_ec2_instances_to_graph(graph, ec2_result, account_id=identity.account_id)
+    for lambda_result in lambda_results:
+        add_lambda_functions_to_graph(graph, lambda_result)
+    add_s3_buckets_to_graph(graph, s3_result)
+    add_scp_policies_to_graph(graph, organizations_result, account_id=identity.account_id)
 
     if verbose:
-        _stdout_console.print("[dim cyan]Evaluating IAM policies...[/dim cyan]", soft_wrap=True)
+        _stdout_console.print("[dim cyan]Evaluating IAM/resource policies...[/dim cyan]", soft_wrap=True)
     evaluate_iam_permissions(graph)
     if verbose:
         effective_permission_count = sum(
@@ -155,7 +253,7 @@ def scan(
     if verbose:
         _stdout_console.print(f"[dim cyan]  found {len(findings)} finding(s)[/dim cyan]", soft_wrap=True)
 
-    document = graph_to_document(graph, account_id=identity.account_id, regions_scanned=[])
+    document = graph_to_document(graph, account_id=identity.account_id, regions_scanned=target_regions)
     document["findings"] = [
         {
             "technique_id": finding.technique_id,
@@ -173,17 +271,25 @@ def scan(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(document, default=_json_default, indent=2))
 
-    if result.gaps:
+    all_gaps: list[ScanGap] = list(iam_result.gaps)
+    for ec2_result in ec2_results:
+        all_gaps.extend(ec2_result.gaps)
+    for lambda_result in lambda_results:
+        all_gaps.extend(lambda_result.gaps)
+    all_gaps.extend(s3_result.gaps)
+    all_gaps.extend(organizations_result.gaps)
+
+    if all_gaps:
         _stderr_console.print(
-            f"[bold yellow]Warning:[/bold yellow] {len(result.gaps)} scan gap(s) encountered "
+            f"[bold yellow]Warning:[/bold yellow] {len(all_gaps)} scan gap(s) encountered "
             "(partial results -- some resources may be missing):"
         )
-        for gap in result.gaps:
+        for gap in all_gaps:
             _stderr_console.print(
                 f"  - {gap.service}:{gap.operation} (scope={gap.scope}) -> {gap.error_code}: {gap.message}"
             )
 
     typer.echo(
-        f"Scan complete for account {identity.account_id}: "
-        f"{graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges written to {output}"
+        f"Scan complete for account {identity.account_id}: {graph.number_of_nodes()} nodes, "
+        f"{graph.number_of_edges()} edges, {len(findings)} finding(s) written to {output}"
     )

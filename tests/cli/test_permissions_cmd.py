@@ -6,11 +6,19 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from aws_graph_builder.cli.app import app
+from aws_graph_builder.scan.ec2 import Ec2Scanner
 from aws_graph_builder.scan.iam import IamScanner
+from aws_graph_builder.scan.lambda_ import LambdaScanner
+from aws_graph_builder.scan.organizations import OrganizationsScanner
+from aws_graph_builder.scan.s3 import S3Scanner
 
 runner = CliRunner()
 
-EXPECTED_ACTIONS = sorted(set(IamScanner.required_actions()) | {"sts:GetCallerIdentity"})
+_ALL_SCANNERS = [IamScanner, Ec2Scanner, LambdaScanner, S3Scanner, OrganizationsScanner]
+EXPECTED_ACTIONS = sorted(
+    {action for scanner in _ALL_SCANNERS for action in scanner.required_actions()}
+    | {"sts:GetCallerIdentity", "ec2:DescribeRegions"}
+)
 
 
 def _assert_is_expected_policy(document: dict[str, object]) -> None:

@@ -2,12 +2,10 @@
 IAM policy document a scan needs.
 
 Aggregates every scanner's `Scanner.required_actions()` (single source of
-truth -- can't drift from what scanners actually call) plus the fixed extra
-action `sts:GetCallerIdentity`, which `session.validate_credentials` calls but
-which isn't owned by any resource scanner.
-
-Phase 1 only has `IamScanner` registered in `_ALL_SCANNERS`; later phases
-(EC2/Lambda/S3/Organizations) extend that list -- no restructuring needed.
+truth -- can't drift from what scanners actually call) plus fixed extra
+actions called directly by the CLI/session/regions layers, not owned by any
+resource scanner: `sts:GetCallerIdentity` (`session.validate_credentials`) and
+`ec2:DescribeRegions` (`regions.discover_enabled_regions`).
 """
 
 from __future__ import annotations
@@ -19,13 +17,17 @@ from typing import Annotated
 import typer
 
 from aws_graph_builder.scan.base import Scanner
+from aws_graph_builder.scan.ec2 import Ec2Scanner
 from aws_graph_builder.scan.iam import IamScanner
+from aws_graph_builder.scan.lambda_ import LambdaScanner
+from aws_graph_builder.scan.organizations import OrganizationsScanner
+from aws_graph_builder.scan.s3 import S3Scanner
 
-_ALL_SCANNERS: list[type[Scanner]] = [IamScanner]
+_ALL_SCANNERS: list[type[Scanner]] = [IamScanner, Ec2Scanner, LambdaScanner, S3Scanner, OrganizationsScanner]
 
-# Actions called directly by the CLI/session layer, not owned by any
+# Actions called directly by the CLI/session/regions layers, not owned by any
 # resource scanner's `required_actions()`.
-_EXTRA_ACTIONS = ["sts:GetCallerIdentity"]
+_EXTRA_ACTIONS = ["sts:GetCallerIdentity", "ec2:DescribeRegions"]
 
 
 def _build_policy_document() -> dict[str, object]:

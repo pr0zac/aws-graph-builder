@@ -57,6 +57,8 @@ def test_scan_writes_graph_document_and_cache_files(tmp_path: Path) -> None:
             str(cache_dir),
             "--region",
             "us-east-1",
+            "--regions",
+            "us-east-1",
         ],
     )
 
@@ -67,7 +69,7 @@ def test_scan_writes_graph_document_and_cache_files(tmp_path: Path) -> None:
     document = json.loads(output_path.read_text())
 
     assert document["account_id"] == account_id
-    assert document["regions_scanned"] == []
+    assert document["regions_scanned"] == ["us-east-1"]
     assert "nodes" in document
     assert "edges" in document
 
@@ -130,6 +132,8 @@ def test_scan_reports_gaps_without_failing(tmp_path: Path, monkeypatch: pytest.M
             str(cache_dir),
             "--region",
             "us-east-1",
+            "--regions",
+            "us-east-1",
         ],
     )
 
@@ -156,6 +160,8 @@ def test_scan_verbose_reports_calls_and_findings(tmp_path: Path) -> None:
             "--cache-dir",
             str(tmp_path / "cache"),
             "--region",
+            "us-east-1",
+            "--regions",
             "us-east-1",
             "--verbose",
         ],
@@ -184,6 +190,8 @@ def test_scan_without_verbose_omits_progress_output(tmp_path: Path) -> None:
             "--cache-dir",
             str(tmp_path / "cache"),
             "--region",
+            "us-east-1",
+            "--regions",
             "us-east-1",
         ],
     )
