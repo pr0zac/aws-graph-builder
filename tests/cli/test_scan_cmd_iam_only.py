@@ -98,6 +98,70 @@ def test_scan_writes_graph_document_and_cache_files(tmp_path: Path) -> None:
     assert cached_files, "expected cache files to be written under the iam cache dir"
     assert any("get_account_authorization_details" in f.name for f in cached_files)
 
+    # The companion report file was also written, with no gaps for a clean scan.
+    report_path = output_path.with_name("graph.report.json")
+    assert report_path.exists()
+    report = json.loads(report_path.read_text())
+    assert report["account_id"] == account_id
+    assert report["regions_scanned"] == ["us-east-1"]
+    assert report["gaps"] == []
+
+
+@mock_aws
+def test_scan_use_cache_resumes_without_recalling_aws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    iam = boto3.client("iam", region_name="us-east-1")
+    _build_fixture(iam)
+
+    output_path = tmp_path / "graph.json"
+    cache_dir = tmp_path / "cache"
+
+    first = runner.invoke(
+        app,
+        [
+            "scan",
+            "--output",
+            str(output_path),
+            "--cache-dir",
+            str(cache_dir),
+            "--region",
+            "us-east-1",
+            "--regions",
+            "us-east-1",
+        ],
+    )
+    assert first.exit_code == 0, first.output
+
+    # Now block every IAM call and confirm --use-cache still succeeds by
+    # reusing what the first run already cached, never touching IAM live.
+    original_make_api_call = botocore.client.BaseClient._make_api_call
+
+    def blocked_make_api_call(self: Any, operation_name: str, kwargs: Any) -> Any:
+        if self._service_model.service_name == "iam":
+            raise AssertionError(f"--use-cache should not have called IAM live: {operation_name}")
+        return original_make_api_call(self, operation_name, kwargs)
+
+    monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", blocked_make_api_call)
+
+    second = runner.invoke(
+        app,
+        [
+            "scan",
+            "--output",
+            str(output_path),
+            "--cache-dir",
+            str(cache_dir),
+            "--region",
+            "us-east-1",
+            "--regions",
+            "us-east-1",
+            "--use-cache",
+        ],
+    )
+
+    assert second.exit_code == 0, second.output
+    document = json.loads(output_path.read_text())
+    assert any(n["type"] == "IamUser" for n in document["nodes"])
+
 
 @mock_aws
 def test_scan_reports_gaps_without_failing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

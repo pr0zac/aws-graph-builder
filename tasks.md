@@ -53,11 +53,13 @@ Tracks implementation progress against the phased build order in `aws-graph-buil
 - [x] Sandbox verification against Cloudfoxable: real S3 buckets (8, including bucket policies), real Lambda functions (5, all with correct `ExecutionRole` edges and 3/5 with real resource policies parsed correctly — public function URLs, SNS triggers), 2310 `EffectivePermission` edges, **188 findings** (up from 120 — `pass_role_ec2`/`pass_role_lambda` alone contributed 34 each), zero dangling edges, 188/188 findings cross-checked against real `PrivescPath` edges
 
 ## Phase 5 — Cache/report/rebuild polish
-- [ ] `report.py` — ScanReport/ScanGap + companion `*.report.json` writer
-- [ ] `cli/rebuild_cmd.py` — cache-only rebuild, no AWS calls
-- [ ] `--use-cache` resume flag on `scan`
-- [ ] README with usage instructions
-- [ ] Verify `rebuild` reproduces the same graph from cache with zero AWS API calls
+- [x] `report.py` — `ScanReport` (account_id/generated_at/regions_scanned/gaps) + `report_path_for()` (`graph.json` → `graph.report.json`) + `write_scan_report()`, wired into both `scan` and `rebuild`
+- [x] `scan/base.py`'s `CachedClient` gained `read_only`/`use_cache` replay modes sharing one `_replay_entry` helper: `read_only` answers purely from cache (`client` can be `None`; a miss becomes a `NoCachedData` gap), `use_cache` checks cache first and falls through to a live call on a miss. Cached errors — even ones that were originally credential-expiry codes — always replay as an ordinary `ScanGap`, never a raised `CredentialsExpiredError` (no live session to protect during replay, and a *stale* cached expiry error shouldn't abort a `--use-cache` resume)
+- [x] `cli/rebuild_cmd.py` — cache-only rebuild, `--account-id` required (no live session to derive it from), regions discovered from the cache directory layout itself, zero AWS calls
+- [x] `--use-cache` resume flag on `scan`
+- [x] Extracted shared `cli/_pipeline.py` (build graph → evaluate → detect → write output/report → print gaps) and `cli/_common.py` (consoles, cache-dir default, json serialization hook) so `scan` and `rebuild` share one implementation instead of two copies
+- [x] `README.md` with usage instructions
+- [x] Verified `rebuild` reproduces the same graph from cache with zero AWS API calls: real scan against the Cloudfoxable sandbox (111 nodes / 2585 edges / 188 findings) followed by `rebuild` from that cache with **all AWS credential env vars unset** and, in the test suite, `botocore`'s `_make_api_call` itself blocked — node ids, edge ids, and findings all identical between the two runs
 
 ## Deferred (not v1)
 - [ ] Phase 2 (network): SecurityGroup/Vpc/Subnet/NetworkInterface/LoadBalancer/RouteTable/InternetGateway nodes, AllowsIngress/AllowsEgress/Routes/ExposesToInternet edges
