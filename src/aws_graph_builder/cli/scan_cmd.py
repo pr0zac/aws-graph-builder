@@ -78,11 +78,17 @@ def scan(
         str | None,
         typer.Option("--region", help="AWS region to use for the STS/IAM calls themselves (IAM is a global service)."),
     ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help="Named AWS CLI profile to use. Falls back to boto3's standard credential chain (AWS_PROFILE env var, then the `default` profile) if omitted.",
+        ),
+    ] = None,
 ) -> None:
     """Scan the AWS account's IAM resources and write a JSON attack-path graph."""
-    session = build_session(region=region)
-
     try:
+        session = build_session(region=region, profile=profile)
         identity = validate_credentials(session)
     except CredentialError as exc:
         _stderr_console.print(f"[bold red]Error:[/bold red] {exc}")

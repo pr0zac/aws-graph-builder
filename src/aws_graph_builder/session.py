@@ -15,7 +15,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    NoCredentialsError,
+    ProfileNotFound,
+)
 
 # botocore error codes that indicate the credentials themselves are
 # expired or otherwise no longer valid (as opposed to being well-formed
@@ -53,13 +58,34 @@ class NoCredentialsFoundError(CredentialError):
     """Raised when boto3's credential chain found no credentials at all."""
 
 
-def build_session(*, region: str | None = None) -> boto3.Session:
+class ProfileNotFoundError(CredentialError):
+    """Raised when an explicitly-requested named profile doesn't exist in
+    the local AWS config/credentials files.
+    """
+
+
+def build_session(*, region: str | None = None, profile: str | None = None) -> boto3.Session:
     """Construct a boto3 Session using the standard credential chain.
 
     This is a thin wrapper — it exists as a seam for testing and future
-    extension, not to add logic beyond an optional region override.
+    extension, not to add logic beyond optional region/profile overrides.
+    `profile=None` falls back to boto3's normal resolution (the
+    `AWS_PROFILE` env var if set, else the `default` profile).
+
+    Unlike credential resolution itself (which is lazy -- see
+    `validate_credentials`), boto3 eagerly validates that a *named* profile
+    actually exists at `Session` construction time, so this can itself raise;
+    wrapped here to keep this module's promise that failures surface as a
+    specific, human-readable exception rather than a raw botocore traceback.
     """
-    return boto3.Session(region_name=region)
+    try:
+        return boto3.Session(region_name=region, profile_name=profile)
+    except ProfileNotFound as exc:
+        raise ProfileNotFoundError(
+            f"AWS profile {profile!r} was not found in your local AWS config "
+            "or credentials files. Check the profile name (e.g. via `aws "
+            "configure list-profiles`) and try again."
+        ) from exc
 
 
 def is_expired_credentials_error(exc: ClientError) -> bool:

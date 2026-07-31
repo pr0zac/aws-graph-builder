@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Phase 0 (packaging) and Phase 1 (IAM-only vertical slice) are complete: `uv run aws-graph-builder scan` builds a real structural IAM graph (users/groups/roles/policies/boundaries/identity providers/instance profiles) from a live AWS account and writes it as JSON, and `uv run aws-graph-builder permissions` emits the least-privilege IAM policy the scan needs. No policy *evaluation* (effective permissions, trust-policy → CanAssume edges) or privesc detection exists yet — that's Phase 2/3. See `tasks.md` for exact status.
+Phase 0 (packaging) and Phase 1 (IAM-only vertical slice) are complete and verified end-to-end against a real AWS account (the Cloudfoxable sandbox): `uv run aws-graph-builder scan` builds a real structural IAM graph (users/groups/roles/policies/boundaries/identity providers/instance profiles) from a live AWS account and writes it as JSON, and `uv run aws-graph-builder permissions` emits the least-privilege IAM policy the scan needs. `scan`/`permissions` accept `--profile` to pick a named AWS CLI profile, falling back to boto3's standard credential chain if omitted. No policy *evaluation* (effective permissions, trust-policy → CanAssume edges) or privesc detection exists yet — that's Phase 2/3. See `tasks.md` for exact status.
+
+Local dev note: this machine has two AWS CLI profiles usable for manual testing — `default` (SSO-based, needs `aws sso login --profile default` when expired) and `cloudfoxable` (a deliberately-vulnerable sandbox account at `/Users/zac/Development/cloudfoxable`, deployed via Terraform using the `default` profile; its CTF user's static keys live in `~/.aws/credentials` under the `cloudfoxable` profile).
 
 boto3-stubs (scoped to iam/ec2/lambda/s3/sts/organizations) and types-networkx are installed as dev deps so mypy fully type-checks AWS/graph code — don't reach for `# type: ignore[import-untyped]` on those imports.
 

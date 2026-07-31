@@ -19,7 +19,7 @@ Tracks implementation progress against the phased build order in `aws-graph-buil
 - [x] `graph/export.py` — MultiDiGraph <-> JSON schema
 - [x] `cli/app.py` + `cli/scan_cmd.py` (minimal) + `cli/permissions_cmd.py` (IAM-only actions)
 - [x] Tests: `tests/scan/test_iam_scanner.py`, `tests/graph/test_builder_iam.py`, `tests/cli/test_scan_cmd_iam_only.py`
-- [ ] Demo: real/sandbox account → IAM inventory graph → `graph.json` (verified against moto-mocked fixtures and against real local AWS config's credential-failure path; not yet run against a real successful AWS account — needs live credentials)
+- [x] Demo: real/sandbox account → IAM inventory graph → `graph.json` (verified against the Cloudfoxable sandbox account, `--profile cloudfoxable`: 84 nodes / 46 edges)
 
 ## Phase 2 — Policy evaluation engine (still IAM-only)
 - [ ] `eval/policy_document.py` — Statement normalization with evidence pointers

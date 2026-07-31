@@ -9,5 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# aws-graph-builder runtime artifacts
+/graph.json
+*.report.json
+
 # Claude
 .claude/settings.local.json
