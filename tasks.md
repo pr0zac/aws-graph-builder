@@ -22,12 +22,14 @@ Tracks implementation progress against the phased build order in `aws-graph-buil
 - [x] Demo: real/sandbox account → IAM inventory graph → `graph.json` (verified against the Cloudfoxable sandbox account, `--profile cloudfoxable`: 84 nodes / 46 edges)
 
 ## Phase 2 — Policy evaluation engine (still IAM-only)
-- [ ] `eval/policy_document.py` — Statement normalization with evidence pointers
-- [ ] `eval/matcher.py` — action/resource wildcard + condition matching
-- [ ] `eval/simulator.py` — deny-wins resolve() + intersect() combinator + PermissionQuery
-- [ ] `eval/trust.py` — AssumeRolePolicyDocument → CanAssume edges
-- [ ] Wire `eval/engine.py` into `scan_cmd.py`
-- [ ] Tests: deny-beats-allow, wildcard matching, NotAction, boundary intersection, condition-unresolved flagging
+- [x] `eval/policy_document.py` — Statement normalization with evidence pointers
+- [x] `eval/matcher.py` — action/resource wildcard + condition matching
+- [x] `eval/simulator.py` — deny-wins `resolve_grants()` + boundary-intersection approximation + `PermissionQuery`
+- [x] `eval/trust.py` — AssumeRolePolicyDocument → CanAssume/IdentifiesVia edges
+- [x] Wire `eval/engine.py` into `scan_cmd.py`
+- [x] Tests: deny-beats-allow, wildcard matching, boundary intersection, condition-unresolved flagging (113/113 passing; `NotAction`/`NotResource` explicitly out of scope, documented in `eval/simulator.py`)
+- [x] Verified against the Cloudfoxable sandbox: 1993 `EffectivePermission` (including legitimate self-targeting grants — see below) + 35 `CanAssume` + 1 `IdentifiesVia` edges, all coherent (correct service-linked-role trust, correct SAML→SSO-admin-role chain, correct multi-policy evidence merging, zero dangling edge references)
+- [x] Fix: self-targeting `EffectivePermission` edges (e.g. "principal can attach a policy to itself") are now materialized rather than excluded — required for Phase 3 to detect self-privesc, the most common real-world technique shape
 
 ## Phase 3 — Privesc registry + IAM-only detectors
 - [ ] `privesc/registry.py` — TechniqueSpec + `@register` decorator

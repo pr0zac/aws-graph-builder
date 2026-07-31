@@ -53,10 +53,15 @@ class EdgeType(str, Enum):
     HAS_PERMISSION_BOUNDARY = "HasPermissionBoundary"  # IamUser/IamRole -> ManagedPolicy
     ATTACHED_TO = "AttachedTo"  # InstanceProfile -> IamRole
     IDENTIFIES_VIA = "IdentifiesVia"  # IamRole -> IdentityProvider
-    # Assuming-principal -> IamRole. Belongs in the schema now, but trust-policy
-    # *evaluation* (i.e. actually populating these edges) is a Phase 2/3 concern
-    # per aws-graph-builder.md's eval/trust.py -- no detection logic lives here.
+    # Assuming-principal -> IamRole. Populated by eval/trust.py (Phase 2).
     CAN_ASSUME = "CanAssume"
+    # principal -> any other node with an arn (IAM-shaped only until Phase 4
+    # adds EC2/S3/Lambda nodes). Populated by eval/engine.py (Phase 2).
+    EFFECTIVE_PERMISSION = "EffectivePermission"
+    # source -> target of a detected privilege-escalation technique. Reserved
+    # here so Phase 3's privesc/engine.py doesn't need to touch this enum;
+    # nothing in Phase 2 populates this.
+    PRIVESC_PATH = "PrivescPath"
 
 
 @dataclass
@@ -93,14 +98,26 @@ def inline_policy_id(owner_arn: str, policy_name: str) -> str:
     return f"{owner_arn}#inline/{policy_name}"
 
 
-def make_edge_id(edge_type: EdgeType, source: str, target: str) -> str:
-    """Deterministic, stable edge id derived from (type, source, target).
+def make_edge_id(edge_type: EdgeType, source: str, target: str, discriminator: str | None = None) -> str:
+    """Deterministic, stable edge id derived from (type, source, target[, discriminator]).
 
     Deterministic ids make exported JSON reproducible across runs (nicer for
     diffing test fixtures and real scan output) as long as at most one edge of
     a given type exists between a given (source, target) pair -- true for
     every Phase 1 edge type, since a principal has at most one MemberOf edge to
     a given group, one AttachedPolicy edge to a given policy, etc.
+
+    `discriminator` is an optional extra string folded into the hash, for edge
+    types where more than one meaningfully-different edge can exist between
+    the same (source, target) pair -- e.g. a role's trust policy naming the
+    same principal ARN in two different statements (`eval/trust.py`), or
+    multiple distinct `PrivescPath`s between the same two nodes (Phase 3).
+    When omitted, the id is byte-for-byte identical to calling this function
+    without the parameter at all, so every existing Phase 1 call site (which
+    passes only 3 positional args) is unaffected.
     """
-    digest = hashlib.sha1(f"{edge_type.value}|{source}|{target}".encode()).hexdigest()
+    key = f"{edge_type.value}|{source}|{target}"
+    if discriminator is not None:
+        key = f"{key}|{discriminator}"
+    digest = hashlib.sha1(key.encode()).hexdigest()
     return f"e-{digest[:12]}"

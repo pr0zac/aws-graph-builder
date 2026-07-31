@@ -20,8 +20,10 @@ import typer
 from rich.console import Console
 
 from aws_graph_builder.cache.store import CacheStore
+from aws_graph_builder.eval.engine import evaluate_iam_permissions
 from aws_graph_builder.graph.builder import build_iam_graph
 from aws_graph_builder.graph.export import graph_to_document
+from aws_graph_builder.graph.schema import EdgeType
 from aws_graph_builder.scan.base import CachedClient
 from aws_graph_builder.scan.iam import IamScanner
 from aws_graph_builder.session import (
@@ -131,6 +133,21 @@ def scan(
     if verbose:
         _stdout_console.print("[dim cyan]Building graph from scan results...[/dim cyan]", soft_wrap=True)
     graph = build_iam_graph(result, account_id=identity.account_id)
+
+    if verbose:
+        _stdout_console.print("[dim cyan]Evaluating IAM policies...[/dim cyan]", soft_wrap=True)
+    evaluate_iam_permissions(graph)
+    if verbose:
+        effective_permission_count = sum(
+            1 for _u, _v, data in graph.edges(data=True) if data.get("type") == EdgeType.EFFECTIVE_PERMISSION.value
+        )
+        can_assume_count = sum(1 for _u, _v, data in graph.edges(data=True) if data.get("type") == EdgeType.CAN_ASSUME.value)
+        _stdout_console.print(
+            f"[dim cyan]  materialized {effective_permission_count} EffectivePermission edge(s), "
+            f"{can_assume_count} CanAssume edge(s)[/dim cyan]",
+            soft_wrap=True,
+        )
+
     document = graph_to_document(graph, account_id=identity.account_id, regions_scanned=[])
 
     output.parent.mkdir(parents=True, exist_ok=True)

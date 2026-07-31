@@ -109,6 +109,26 @@ def _build_sample_graph() -> nx.MultiDiGraph:
     return graph
 
 
+def test_make_edge_id_discriminator_backward_compatible_and_distinct() -> None:
+    # Omitting the discriminator produces the exact same id as before it
+    # existed -- every Phase 1 call site passes only 3 positional args, and
+    # must keep working unchanged.
+    without_discriminator = make_edge_id(EdgeType.CAN_ASSUME, ALICE_ARN, GROUP_ARN)
+    assert without_discriminator == make_edge_id(EdgeType.CAN_ASSUME, ALICE_ARN, GROUP_ARN, None)
+
+    # Different discriminators with an otherwise-identical (type, source,
+    # target) triple produce different ids, so parallel edges of the same
+    # type between the same two nodes stay distinct and stable.
+    with_sid_a = make_edge_id(EdgeType.CAN_ASSUME, ALICE_ARN, GROUP_ARN, discriminator="StatementA")
+    with_sid_b = make_edge_id(EdgeType.CAN_ASSUME, ALICE_ARN, GROUP_ARN, discriminator="StatementB")
+    assert with_sid_a != with_sid_b
+    assert with_sid_a != without_discriminator
+    assert with_sid_b != without_discriminator
+
+    # Deterministic: same discriminator -> same id across calls.
+    assert with_sid_a == make_edge_id(EdgeType.CAN_ASSUME, ALICE_ARN, GROUP_ARN, discriminator="StatementA")
+
+
 def test_add_edge_supports_parallel_edges_of_different_types() -> None:
     graph = _build_sample_graph()
 
