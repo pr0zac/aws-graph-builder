@@ -52,6 +52,7 @@ class IamScanner(Scanner):
         ]
 
     def scan(self) -> IamScanResult:
+        self._client.report("Fetching IAM account authorization details (users, groups, roles, policies)...")
         auth_details = self._client.paginate(
             "get_account_authorization_details",
             ["UserDetailList", "GroupDetailList", "RoleDetailList", "Policies"],
@@ -60,12 +61,23 @@ class IamScanner(Scanner):
         groups = auth_details["GroupDetailList"] if auth_details else []
         roles = auth_details["RoleDetailList"] if auth_details else []
         customer_managed_policies = auth_details["Policies"] if auth_details else []
+        self._client.report(
+            f"  found {len(users)} user(s), {len(groups)} group(s), {len(roles)} role(s), "
+            f"{len(customer_managed_policies)} customer-managed polic{'y' if len(customer_managed_policies) == 1 else 'ies'}"
+        )
 
+        self._client.report("Fetching SAML identity providers...")
         saml_providers = self._scan_saml_providers()
-        oidc_providers = self._scan_oidc_providers()
+        self._client.report(f"  found {len(saml_providers)} SAML provider(s)")
 
+        self._client.report("Fetching OIDC identity providers...")
+        oidc_providers = self._scan_oidc_providers()
+        self._client.report(f"  found {len(oidc_providers)} OIDC provider(s)")
+
+        self._client.report("Fetching instance profiles...")
         instance_profiles_page = self._client.paginate("list_instance_profiles", ["InstanceProfiles"])
         instance_profiles = instance_profiles_page["InstanceProfiles"] if instance_profiles_page else []
+        self._client.report(f"  found {len(instance_profiles)} instance profile(s)")
 
         return IamScanResult(
             users=users,

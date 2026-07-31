@@ -14,6 +14,7 @@ boto3-stubs (scoped to iam/ec2/lambda/s3/sts/organizations) and types-networkx a
 
 - `uv run aws-graph-builder --help` — list CLI commands (`scan`, `permissions`, `version`)
 - `uv run aws-graph-builder scan --output graph.json` — scan the account's IAM (via ambient boto3 credentials) and write the graph
+- `uv run aws-graph-builder scan --profile NAME --verbose` — use a named AWS CLI profile, and print each AWS call made and what it finds to stdout as it runs
 - `uv run aws-graph-builder permissions` — print the read-only IAM policy a scan needs
 - `uv run pytest` — run tests (moto-mocked; no real AWS credentials needed)
 - `uv run ruff check .` — lint

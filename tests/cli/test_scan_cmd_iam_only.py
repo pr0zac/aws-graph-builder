@@ -142,6 +142,57 @@ def test_scan_reports_gaps_without_failing(tmp_path: Path, monkeypatch: pytest.M
     assert any(n["type"] == "IamUser" for n in document["nodes"])
 
 
+@mock_aws
+def test_scan_verbose_reports_calls_and_findings(tmp_path: Path) -> None:
+    iam = boto3.client("iam", region_name="us-east-1")
+    _build_fixture(iam)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--output",
+            str(tmp_path / "graph.json"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--region",
+            "us-east-1",
+            "--verbose",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Authenticated as" in result.output
+    assert "iam:get_account_authorization_details" in result.output
+    assert "found 1 user(s), 1 group(s), 1 role(s)" in result.output
+    assert "iam:list_saml_providers" in result.output
+    assert "found 0 SAML provider(s)" in result.output
+    assert "Building graph from scan results" in result.output
+
+
+@mock_aws
+def test_scan_without_verbose_omits_progress_output(tmp_path: Path) -> None:
+    iam = boto3.client("iam", region_name="us-east-1")
+    _build_fixture(iam)
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--output",
+            str(tmp_path / "graph.json"),
+            "--cache-dir",
+            str(tmp_path / "cache"),
+            "--region",
+            "us-east-1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "iam:get_account_authorization_details" not in result.output
+    assert "Authenticated as" not in result.output
+
+
 def test_scan_exits_cleanly_on_credential_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A credential-validation failure should exit non-zero with a clean
     message, never a raw traceback reaching the user.

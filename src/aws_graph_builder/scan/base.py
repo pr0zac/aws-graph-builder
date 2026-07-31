@@ -16,7 +16,7 @@ usage symmetric with non-paginated calls.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -94,14 +94,36 @@ class CachedClient:
     (`session.is_expired_credentials_error`), in which case
     `session.CredentialsExpiredError` is raised instead: at that point the
     entire scan is unrecoverable, not just this one call.
+
+    An optional `reporter` callback -- one arg, a message string -- is
+    invoked for each AWS call made (via `report()`/`call()`/`paginate()`),
+    for `--verbose` progress output. Scanners (e.g. `IamScanner`) also call
+    `report()` directly for their own higher-level, domain-specific
+    narration (e.g. "found 12 users"), so this is the single shared channel
+    for both "what it's doing" (this class) and "what it's finding" (the
+    scanner).
     """
 
-    def __init__(self, client: Any, cache_store: CacheStore, *, scope: str, service: str) -> None:
+    def __init__(
+        self,
+        client: Any,
+        cache_store: CacheStore,
+        *,
+        scope: str,
+        service: str,
+        reporter: Callable[[str], None] | None = None,
+    ) -> None:
         self._client = client
         self._cache_store = cache_store
         self._scope = scope
         self._service = service
+        self._reporter = reporter
         self.gaps: list[ScanGap] = []
+
+    def report(self, message: str) -> None:
+        """Emit a verbose progress message, if a `reporter` was configured."""
+        if self._reporter is not None:
+            self._reporter(message)
 
     def call(
         self,
@@ -115,6 +137,7 @@ class CachedClient:
         Returns the raw response dict, or `None` if the call failed (in which
         case a `ScanGap` was appended to `self.gaps`).
         """
+        self.report(f"{self._service}:{operation}" + (f" ({disambiguator})" if disambiguator else ""))
         params = dict(params) if params else {}
         method = getattr(self._client, operation)
         try:
@@ -155,6 +178,7 @@ class CachedClient:
         which case a `ScanGap` was appended and any partial pages already
         fetched are discarded rather than cached as if complete).
         """
+        self.report(f"{self._service}:{operation} (paginated)")
         params = dict(params) if params else {}
         paginator = self._client.get_paginator(operation)
         merged: dict[str, list[Any]] = {key: [] for key in list_keys}

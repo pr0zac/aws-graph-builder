@@ -32,7 +32,12 @@ from aws_graph_builder.session import (
 
 CACHE_DIR_ENV_VAR = "AWS_GRAPH_BUILDER_CACHE_DIR"
 
-_stderr_console = Console(stderr=True)
+# `highlight=False`: rich's automatic highlighting wraps numbers and
+# parenthesized text in their own ANSI spans (e.g. "1 user(s)" becomes
+# several separately-styled fragments), which is unwanted for these
+# plain progress/status/error messages.
+_stderr_console = Console(stderr=True, highlight=False)
+_stdout_console = Console(highlight=False)
 
 
 def _json_default(obj: Any) -> Any:
@@ -85,8 +90,20 @@ def scan(
             help="Named AWS CLI profile to use. Falls back to boto3's standard credential chain (AWS_PROFILE env var, then the `default` profile) if omitted.",
         ),
     ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Print each AWS call the scanner makes and what it finds, to stdout."),
+    ] = False,
 ) -> None:
     """Scan the AWS account's IAM resources and write a JSON attack-path graph."""
+    # `soft_wrap=True` throughout this function's verbose output: these are
+    # log-style progress lines, not prose meant to fill/wrap to the terminal
+    # width -- and rich's default word-wrapping is unpredictable (and breaks
+    # substring assertions in tests) when no real tty width can be detected.
+    reporter = (
+        (lambda message: _stdout_console.print(f"[dim cyan]{message}[/dim cyan]", soft_wrap=True)) if verbose else None
+    )
+
     try:
         session = build_session(region=region, profile=profile)
         identity = validate_credentials(session)
@@ -94,11 +111,16 @@ def scan(
         _stderr_console.print(f"[bold red]Error:[/bold red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    if verbose:
+        _stdout_console.print(
+            f"[bold]Authenticated as[/bold] {identity.arn} (account {identity.account_id})", soft_wrap=True
+        )
+
     cache_root = (cache_dir if cache_dir is not None else _default_cache_dir()) / identity.account_id
     cache_store = CacheStore(cache_root)
 
     iam_client = session.client("iam")
-    cached_client = CachedClient(iam_client, cache_store, scope="global", service="iam")
+    cached_client = CachedClient(iam_client, cache_store, scope="global", service="iam", reporter=reporter)
 
     try:
         result = IamScanner(cached_client).scan()
@@ -106,6 +128,8 @@ def scan(
         _stderr_console.print(f"[bold red]Error:[/bold red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    if verbose:
+        _stdout_console.print("[dim cyan]Building graph from scan results...[/dim cyan]", soft_wrap=True)
     graph = build_iam_graph(result, account_id=identity.account_id)
     document = graph_to_document(graph, account_id=identity.account_id, regions_scanned=[])
 
