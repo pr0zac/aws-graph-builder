@@ -10,16 +10,16 @@ Tracks implementation progress against the phased build order in `aws-graph-buil
 - [x] `uv add --dev moto pytest pytest-cov ruff mypy`
 
 ## Phase 1 — IAM-only vertical slice (structural graph, no evaluation)
-- [ ] `session.py` — boto3 Session construction, `sts:GetCallerIdentity` validation, expiry handling
-- [ ] `cache/store.py` + `cache/keys.py` — content-keyed JSON file cache
-- [ ] `scan/base.py` — Scanner ABC, ScanGap, CachedClient wrapper
-- [ ] `scan/iam.py` — users/groups/roles/policies/boundaries/identity providers/instance profiles
-- [ ] `graph/schema.py` — NodeType/EdgeType enums, Node/Edge dataclasses, ID scheme
-- [ ] `graph/builder.py` — structural graph builder (IAM types only)
-- [ ] `graph/export.py` — MultiDiGraph <-> JSON schema
-- [ ] `cli/app.py` + `cli/scan_cmd.py` (minimal) + `cli/permissions_cmd.py` (IAM-only actions)
-- [ ] Tests: `tests/scan/test_iam_scanner.py`, `tests/graph/test_builder_iam.py`, `tests/cli/test_scan_cmd_iam_only.py`
-- [ ] Demo: real/sandbox account → IAM inventory graph → `graph.json`
+- [x] `session.py` — boto3 Session construction, `sts:GetCallerIdentity` validation, expiry handling
+- [x] `cache/store.py` + `cache/keys.py` — content-keyed JSON file cache
+- [x] `scan/base.py` — Scanner ABC, ScanGap, CachedClient wrapper
+- [x] `scan/iam.py` — users/groups/roles/policies/boundaries/identity providers/instance profiles
+- [x] `graph/schema.py` — NodeType/EdgeType enums, Node/Edge dataclasses, ID scheme
+- [x] `graph/builder.py` — structural graph builder (IAM types only)
+- [x] `graph/export.py` — MultiDiGraph <-> JSON schema
+- [x] `cli/app.py` + `cli/scan_cmd.py` (minimal) + `cli/permissions_cmd.py` (IAM-only actions)
+- [x] Tests: `tests/scan/test_iam_scanner.py`, `tests/graph/test_builder_iam.py`, `tests/cli/test_scan_cmd_iam_only.py`
+- [ ] Demo: real/sandbox account → IAM inventory graph → `graph.json` (verified against moto-mocked fixtures and against real local AWS config's credential-failure path; not yet run against a real successful AWS account — needs live credentials)
 
 ## Phase 2 — Policy evaluation engine (still IAM-only)
 - [ ] `eval/policy_document.py` — Statement normalization with evidence pointers

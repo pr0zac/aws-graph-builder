@@ -4,12 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Phase 0 (packaging groundwork) is complete: the repo is now a `src/`-layout installable package (`src/aws_graph_builder/`), with a Typer CLI entry point wired up (`uv run aws-graph-builder`), and runtime (boto3, networkx, typer, rich) plus dev (moto, pytest, pytest-cov, ruff, mypy) dependencies installed. No scanning/graph/evaluation logic exists yet — see `tasks.md` for what's next (Phase 1: IAM-only vertical slice).
+Phase 0 (packaging) and Phase 1 (IAM-only vertical slice) are complete: `uv run aws-graph-builder scan` builds a real structural IAM graph (users/groups/roles/policies/boundaries/identity providers/instance profiles) from a live AWS account and writes it as JSON, and `uv run aws-graph-builder permissions` emits the least-privilege IAM policy the scan needs. No policy *evaluation* (effective permissions, trust-policy → CanAssume edges) or privesc detection exists yet — that's Phase 2/3. See `tasks.md` for exact status.
+
+boto3-stubs (scoped to iam/ec2/lambda/s3/sts/organizations) and types-networkx are installed as dev deps so mypy fully type-checks AWS/graph code — don't reach for `# type: ignore[import-untyped]` on those imports.
 
 ## Commands
 
-- `uv run aws-graph-builder` — run the CLI (currently a placeholder `version` command; collapses to single-command mode until more subcommands are added in later phases)
-- `uv run pytest` — run tests
+- `uv run aws-graph-builder --help` — list CLI commands (`scan`, `permissions`, `version`)
+- `uv run aws-graph-builder scan --output graph.json` — scan the account's IAM (via ambient boto3 credentials) and write the graph
+- `uv run aws-graph-builder permissions` — print the read-only IAM policy a scan needs
+- `uv run pytest` — run tests (moto-mocked; no real AWS credentials needed)
 - `uv run ruff check .` — lint
 - `uv run mypy src` — type check
 
