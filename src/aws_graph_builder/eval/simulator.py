@@ -53,6 +53,30 @@ scope warrants. Instead:
   (conservative inclusion, not exclusion -- a security tool should surface
   possible risk, not hide it) but flagged `condition_unresolved=True` on the
   resulting `Grant`.
+
+- **Service Control Policies (SCPs)**, like permission boundaries, can only
+  ever *restrict*, never grant, an identity-level Allow -- and are applied
+  via the exact same symmetric wildcard-overlap check described above for
+  boundary intersection, with the same imprecision for wildcard-vs-wildcard
+  comparisons. Real AWS SCP evaluation is more involved than this module
+  models: SCPs live at every level of an org hierarchy (account, OU, root)
+  and the *effective* SCP for an account is the intersection of every level
+  above it, with per-policy-type enablement toggles this tool has no visibility
+  into. This module doesn't attempt any of that -- `resolve_grants`'s optional
+  `scp_statements` parameter is simply every statement from every SCP
+  currently attached to *this* account (Phase 4's Organizations scanner only
+  fetches policies already attached to the account being scanned, so treating
+  them as uniformly account-wide is accurate for what's actually fetched, even
+  though it elides the multi-level-hierarchy nuance). When more than one SCP
+  is attached, every SCP's Allow statements are unioned together into a single
+  "SCP allow set" before the overlap check -- an identity-ALLOW grant survives
+  only if it overlaps at least one Allow statement from *any* attached SCP,
+  not necessarily the same one. Every SCP's explicit Deny statements are
+  likewise unioned and applied via the same explicit-deny-wins overlap check
+  used for identity-level denies -- an SCP deny can veto a grant exactly as an
+  identity deny can. Passing `scp_statements=None` (the default) skips SCP
+  filtering entirely, identical to today's behavior before this parameter
+  existed.
 """
 
 from __future__ import annotations
@@ -113,12 +137,16 @@ def resolve_grants(
     *,
     identity_statements: list[Statement],
     boundary_statements: list[Statement] | None,
+    scp_statements: list[Statement] | None = None,
 ) -> list[Grant]:
     """Resolve a principal's identity statements (already the union of every
     attached managed policy + every inline policy's statements) intersected
-    with its permission boundary (if any), with explicit-deny-always-wins,
-    into a list of surviving `Grant`s. See module docstring for the boundary/
-    deny pattern-overlap approximation this implements.
+    with its permission boundary (if any) and its account's attached SCPs (if
+    any), with explicit-deny-always-wins (identity-level AND SCP-level), into
+    a list of surviving `Grant`s. `scp_statements=None` (the default) skips
+    SCP filtering entirely -- every existing call site keeps working
+    unchanged. See module docstring for the boundary/SCP/deny pattern-overlap
+    approximation this implements.
     """
     identity_allow_pairs = _expand_pairs(identity_statements, effect="Allow")
     identity_deny_pairs = _expand_pairs(identity_statements, effect="Deny")
@@ -126,6 +154,12 @@ def resolve_grants(
     boundary_allow_pairs: list[tuple[str, str, Statement]] | None = None
     if boundary_statements is not None:
         boundary_allow_pairs = _expand_pairs(boundary_statements, effect="Allow")
+
+    scp_allow_pairs: list[tuple[str, str, Statement]] | None = None
+    scp_deny_pairs: list[tuple[str, str, Statement]] = []
+    if scp_statements is not None:
+        scp_allow_pairs = _expand_pairs(scp_statements, effect="Allow")
+        scp_deny_pairs = _expand_pairs(scp_statements, effect="Deny")
 
     grants: list[Grant] = []
     for action_pattern, resource_pattern, statement in identity_allow_pairs:
@@ -140,6 +174,19 @@ def resolve_grants(
             if not covered:
                 continue
 
+        # SCP intersection: same approximation as boundary intersection above
+        # -- an identity-ALLOW grant only survives if some attached SCP has a
+        # compatible ALLOW somewhere (statements from every attached SCP are
+        # already unioned together into scp_allow_pairs by the caller).
+        if scp_allow_pairs is not None:
+            scp_covered = any(
+                _patterns_overlap(action_pattern, s_action, matcher=action_matches)
+                and _patterns_overlap(resource_pattern, s_resource, matcher=resource_matches)
+                for s_action, s_resource, _s_statement in scp_allow_pairs
+            )
+            if not scp_covered:
+                continue
+
         # Explicit deny always wins: drop the grant entirely if any identity
         # deny statement could plausibly apply.
         denied = any(
@@ -148,6 +195,17 @@ def resolve_grants(
             for d_action, d_resource, _d_statement in identity_deny_pairs
         )
         if denied:
+            continue
+
+        # An SCP explicit deny can also veto a grant, via the same overlap
+        # check (scp_deny_pairs is [] when scp_statements is None, so this is
+        # always False in that case -- no behavior change for existing callers).
+        scp_denied = any(
+            _patterns_overlap(action_pattern, d_action, matcher=action_matches)
+            and _patterns_overlap(resource_pattern, d_resource, matcher=resource_matches)
+            for d_action, d_resource, _d_statement in scp_deny_pairs
+        )
+        if scp_denied:
             continue
 
         resolved = condition_matches(statement.conditions)

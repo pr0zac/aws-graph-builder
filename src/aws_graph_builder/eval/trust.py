@@ -1,6 +1,23 @@
 """`AssumeRolePolicyDocument` (trust policy) evaluation -> `CanAssume` /
 `IdentifiesVia` edges.
 
+This module is split into two layers:
+
+- **Shared principal resolvers** (`resolve_aws_principal`,
+  `resolve_federated_principal`, `resolve_service_principal`, plus the
+  helpers `ensure_external_wildcard_node`/`extract_root_account_id`/
+  `normalize_principal_values`) answer only "which node does this Principal
+  VALUE refer to", creating an `ExternalPrincipal`/`ServicePrincipal` node if
+  one doesn't already exist. They do no edge creation and know nothing about
+  trust policies specifically -- `eval/resource_policy.py` reuses them as-is
+  to resolve S3/Lambda resource-policy principals into `EffectivePermission`
+  edges instead of `CanAssume` edges.
+- **Trust-specific edge creation** (the private `_handle_*_principal`
+  functions plus `evaluate_trust_policies` below) builds `CanAssume` edges
+  (and `IdentifiesVia` edges for `Federated` principals) on top of those
+  resolvers, attaching the MFA/ExternalId/condition-unresolved properties
+  that are specific to trust-policy evaluation.
+
 For every `IamRole` node, parses its `properties["AssumeRolePolicyDocument"]`
 (stored verbatim by `graph.builder.build_iam_graph`) and, for each `Allow`
 statement's `Principal` block, creates a `CanAssume` edge from the resolved
@@ -64,7 +81,7 @@ def _role_account_id(role_arn: str) -> str:
     return parts[4] if len(parts) > 4 else ""
 
 
-def _extract_root_account_id(value: str) -> str | None:
+def extract_root_account_id(value: str) -> str | None:
     """A bare 12-digit account id or `arn:aws:iam::ACCOUNT:root` -> `ACCOUNT`,
     else `None`.
     """
@@ -76,7 +93,7 @@ def _extract_root_account_id(value: str) -> str | None:
     return None
 
 
-def _normalize_principal_values(value: Any) -> list[str]:
+def normalize_principal_values(value: Any) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
@@ -115,13 +132,86 @@ def _condition_unresolved_beyond_recognized(conditions: dict[str, dict[str, Any]
     return condition_matches(remainder) is None
 
 
-def _ensure_external_wildcard_node(graph: nx.MultiDiGraph) -> str:
+def ensure_external_wildcard_node(graph: nx.MultiDiGraph) -> str:
+    """Ensure the synthetic `ExternalPrincipal` node representing a literal
+    `"*"` principal exists in `graph`, returning its id.
+    """
     if _EXTERNAL_WILDCARD_ID not in graph.nodes:
         add_node(
             graph,
             Node(id=_EXTERNAL_WILDCARD_ID, type=NodeType.EXTERNAL_PRINCIPAL, name="Any Principal (*)", arn=None),
         )
     return _EXTERNAL_WILDCARD_ID
+
+
+def resolve_aws_principal(
+    graph: nx.MultiDiGraph,
+    arn_to_node: dict[str, str],
+    value: str,
+    own_account_id: str,
+) -> tuple[str | None, bool]:
+    """Resolve one `Principal.AWS` (or bare-string `"__raw__"`) value -- a
+    literal `"*"`, an ARN matching an existing node, a bare 12-digit account
+    id / account-root ARN, or an unresolvable cross-account ARN -- to a node
+    id, creating an `ExternalPrincipal`/wildcard node in `graph` if needed.
+    Pure node resolution only: no edge is created here.
+
+    `own_account_id` is the account id of whatever this principal value is
+    being resolved in the context of (a role's own account for trust-policy
+    evaluation, a resource's owning account for resource-policy evaluation)
+    -- used only to recognize a bare account id / root ARN naming that same
+    account.
+
+    Returns `(node_id, is_account_node)`. `node_id` is `None` only in the
+    defensive case where `value` names this same account's root ARN but the
+    `Account` node it should resolve to isn't present in the graph (shouldn't
+    normally happen -- `graph.builder` always creates it -- but callers must
+    handle the no-op case rather than assuming a node id always comes back).
+    `is_account_node` is `True` when `node_id` is specifically the `Account`
+    node (a bare account id / root ARN matching `own_account_id`, or an `AWS`
+    entry that's an ARN already resolving to the `Account` node) -- callers
+    that care about that distinction (e.g. trust.py's "assume-role available
+    to the whole account" note) can act on it; others can ignore it.
+    """
+    if value == "*":
+        return ensure_external_wildcard_node(graph), False
+
+    existing = arn_to_node.get(value)
+    if existing is not None:
+        is_account = graph.nodes[existing].get("type") == NodeType.ACCOUNT.value
+        return existing, is_account
+
+    account_id = extract_root_account_id(value)
+    if account_id is not None and account_id == own_account_id:
+        account_node_id = f"arn:aws:iam::{account_id}:root"
+        if account_node_id in graph.nodes:
+            return account_node_id, True
+        return None, False  # Defensive: the Account node should always exist.
+
+    # Cross-account, or an account principal never scanned -> ExternalPrincipal.
+    if value not in graph.nodes:
+        add_node(graph, Node(id=value, type=NodeType.EXTERNAL_PRINCIPAL, name=_name_from_arn(value), arn=value))
+    return value, False
+
+
+def resolve_federated_principal(graph: nx.MultiDiGraph, arn_to_node: dict[str, str], value: str) -> str | None:
+    """Resolve one `Principal.Federated` value to an existing `IdentityProvider`
+    node's id, or `None` if no such node exists (callers skip gracefully).
+    """
+    idp_node_id = arn_to_node.get(value)
+    if idp_node_id is None or graph.nodes[idp_node_id].get("type") != NodeType.IDENTITY_PROVIDER.value:
+        return None
+    return idp_node_id
+
+
+def resolve_service_principal(graph: nx.MultiDiGraph, value: str) -> str:
+    """Resolve one `Principal.Service` value to a `ServicePrincipal` node id,
+    creating the node (keyed by the service principal string itself, e.g.
+    `"ec2.amazonaws.com"`) in `graph` if it doesn't already exist.
+    """
+    if value not in graph.nodes:
+        add_node(graph, Node(id=value, type=NodeType.SERVICE_PRINCIPAL, name=value, arn=None))
+    return value
 
 
 def _add_can_assume_edge(
@@ -144,37 +234,17 @@ def _handle_aws_style_principal(
     edge_props: dict[str, Any],
     discriminator: str,
 ) -> None:
+    node_id, is_account = resolve_aws_principal(graph, arn_to_node, value, role_account_id)
+    if node_id is None:
+        return  # Defensive: see resolve_aws_principal's docstring.
+
+    props = dict(edge_props)
     if value == "*":
-        node_id = _ensure_external_wildcard_node(graph)
-        _add_can_assume_edge(graph, node_id, role_arn, {**edge_props, "principal_kind": "wildcard"}, discriminator)
-        return
-
-    existing = arn_to_node.get(value)
-    if existing is not None:
-        props = dict(edge_props)
-        if graph.nodes[existing].get("type") == NodeType.ACCOUNT.value:
-            props["principal_kind"] = "account"
-            props["note"] = "grants assume-role to any principal in this account with sts:AssumeRole permission"
-        _add_can_assume_edge(graph, existing, role_arn, props, discriminator)
-        return
-
-    account_id = _extract_root_account_id(value)
-    if account_id is not None and account_id == role_account_id:
-        account_node_id = f"arn:aws:iam::{account_id}:root"
-        if account_node_id in graph.nodes:
-            props = {
-                **edge_props,
-                "principal_kind": "account",
-                "note": "grants assume-role to any principal in this account with sts:AssumeRole permission",
-            }
-            _add_can_assume_edge(graph, account_node_id, role_arn, props, discriminator)
-        # else: defensive skip -- the Account node should always exist.
-        return
-
-    # Cross-account, or an account principal never scanned -> ExternalPrincipal.
-    if value not in graph.nodes:
-        add_node(graph, Node(id=value, type=NodeType.EXTERNAL_PRINCIPAL, name=_name_from_arn(value), arn=value))
-    _add_can_assume_edge(graph, value, role_arn, edge_props, discriminator)
+        props["principal_kind"] = "wildcard"
+    elif is_account:
+        props["principal_kind"] = "account"
+        props["note"] = "grants assume-role to any principal in this account with sts:AssumeRole permission"
+    _add_can_assume_edge(graph, node_id, role_arn, props, discriminator)
 
 
 def _handle_federated_principal(
@@ -185,8 +255,8 @@ def _handle_federated_principal(
     edge_props: dict[str, Any],
     discriminator: str,
 ) -> None:
-    idp_node_id = arn_to_node.get(value)
-    if idp_node_id is None or graph.nodes[idp_node_id].get("type") != NodeType.IDENTITY_PROVIDER.value:
+    idp_node_id = resolve_federated_principal(graph, arn_to_node, value)
+    if idp_node_id is None:
         return  # Defensive: no matching IdentityProvider node -- skip gracefully.
     _add_can_assume_edge(graph, idp_node_id, role_arn, edge_props, discriminator)
     identifies_via_id = make_edge_id(EdgeType.IDENTIFIES_VIA, role_arn, idp_node_id)
@@ -203,9 +273,8 @@ def _handle_service_principal(
     edge_props: dict[str, Any],
     discriminator: str,
 ) -> None:
-    if value not in graph.nodes:
-        add_node(graph, Node(id=value, type=NodeType.SERVICE_PRINCIPAL, name=value, arn=None))
-    _add_can_assume_edge(graph, value, role_arn, edge_props, discriminator)
+    node_id = resolve_service_principal(graph, value)
+    _add_can_assume_edge(graph, node_id, role_arn, edge_props, discriminator)
 
 
 def evaluate_trust_policies(graph: nx.MultiDiGraph) -> None:
@@ -255,15 +324,15 @@ def evaluate_trust_policies(graph: nx.MultiDiGraph) -> None:
                 "condition_unresolved": condition_unresolved,
             }
 
-            aws_values = _normalize_principal_values(principal.get("AWS"))
+            aws_values = normalize_principal_values(principal.get("AWS"))
             raw_value = principal.get("__raw__")
             if isinstance(raw_value, str):
                 aws_values.append(raw_value)
             for value in aws_values:
                 _handle_aws_style_principal(graph, arn_to_node, value, role_arn, role_account_id, edge_props, discriminator)
 
-            for value in _normalize_principal_values(principal.get("Federated")):
+            for value in normalize_principal_values(principal.get("Federated")):
                 _handle_federated_principal(graph, arn_to_node, value, role_arn, edge_props, discriminator)
 
-            for value in _normalize_principal_values(principal.get("Service")):
+            for value in normalize_principal_values(principal.get("Service")):
                 _handle_service_principal(graph, value, role_arn, edge_props, discriminator)

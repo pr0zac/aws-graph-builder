@@ -2,7 +2,8 @@
 (as produced by `graph.builder.build_iam_graph`): resolves each principal's
 effective permissions and materializes them as `EffectivePermission` edges,
 then evaluates every role's trust policy into `CanAssume`/`IdentifiesVia`
-edges.
+edges, then evaluates every S3/Lambda resource policy into further
+`EffectivePermission` edges.
 
 ## Scoping (Phase 2, IAM-only -- see aws-graph-builder.md's phase split)
 
@@ -29,7 +30,8 @@ still valid grant *targets* like any other node with an ARN):
    again, a boundary policy with no available document (AWS-managed boundary)
    is treated as "no usable boundary data", i.e. the same as having no
    boundary at all, rather than blocking every grant defensively.
-3. Call `simulator.resolve_grants` to get the surviving `Grant`s.
+3. Call `simulator.resolve_grants` (passing every SCP statement currently in
+   the graph -- see below) to get the surviving `Grant`s.
 4. For every OTHER node in the graph with a non-`None` `arn`, check
    `resource_matches` against each grant's resource pattern; nodes with at
    least one match get exactly one `EffectivePermission` edge, whose
@@ -39,8 +41,25 @@ still valid grant *targets* like any other node with an ARN):
    the deduplicated list of contributing evidence pointers, and whose
    `condition_unresolved` is `True` if any contributing grant had one.
 
-Finally, `trust.evaluate_trust_policies` runs once (not per-principal -- it
-already iterates every `IamRole` node itself).
+## SCP statements
+
+Every `ServiceControlPolicy` node currently in the graph has its
+`properties["content"]` parsed once (not per-principal -- there's normally at
+most a handful of SCPs in a real account, and Phase 4's Organizations scanner
+only fetches SCPs already attached to *this* account, so they all apply
+account-wide) and the resulting statements are passed as `resolve_grants`'s
+`scp_statements` for every principal. If the graph has no
+`ServiceControlPolicy` nodes at all (not in an org, or Organizations wasn't
+reachable), `None` is passed instead of an empty list -- SCP filtering is
+skipped entirely, the same as if the parameter didn't exist, rather than
+treating "no SCP data available" as "an SCP that allows nothing". See
+`eval/simulator.py`'s module docstring for the SCP intersection approximation
+itself.
+
+Finally, `trust.evaluate_trust_policies` and
+`resource_policy.evaluate_resource_policies` each run once (not per-principal
+-- they already iterate every `IamRole`/`S3Bucket`/`LambdaFunction` node
+themselves).
 
 Malformed policy documents (`parse_policy_document` raising `ValueError`) are
 handled by skipping that specific policy for that principal -- there's no
@@ -57,6 +76,7 @@ import networkx as nx
 
 from aws_graph_builder.eval.matcher import resource_matches
 from aws_graph_builder.eval.policy_document import Statement, parse_policy_document
+from aws_graph_builder.eval.resource_policy import evaluate_resource_policies
 from aws_graph_builder.eval.simulator import Grant, resolve_grants
 from aws_graph_builder.eval.trust import evaluate_trust_policies
 from aws_graph_builder.graph.export import add_edge
@@ -110,6 +130,31 @@ def _collect_boundary_statements(graph: nx.MultiDiGraph, principal_arn: str) -> 
             return None
         return parsed.statements
     return None  # No permission boundary at all.
+
+
+def _collect_scp_statements(graph: nx.MultiDiGraph) -> list[Statement] | None:
+    """Every statement from every `ServiceControlPolicy` node currently in
+    the graph, or `None` if there are no such nodes at all (see module
+    docstring: `None` means "skip SCP filtering", distinct from an empty list
+    which would mean "every attached SCP allows nothing").
+    """
+    scp_nodes = [
+        (node_id, data) for node_id, data in graph.nodes(data=True) if data.get("type") == NodeType.SERVICE_CONTROL_POLICY.value
+    ]
+    if not scp_nodes:
+        return None
+
+    statements: list[Statement] = []
+    for node_id, data in scp_nodes:
+        content = data.get("properties", {}).get("content")
+        if content is None:
+            continue
+        try:
+            parsed = parse_policy_document(content, source=f"scp:{node_id}")
+        except ValueError:
+            continue
+        statements.extend(parsed.statements)
+    return statements
 
 
 def _materialize_effective_permissions(
@@ -178,15 +223,21 @@ def evaluate_iam_permissions(graph: nx.MultiDiGraph) -> None:
     # edges are added -- materialization only adds edges, never nodes, so this
     # stays valid across the whole principal loop below.
     all_target_nodes = [(node_id, data["arn"]) for node_id, data in graph.nodes(data=True) if data.get("arn") is not None]
+    scp_statements = _collect_scp_statements(graph)
 
     for principal_arn, _data in principal_entries:
         identity_statements = _collect_identity_statements(graph, principal_arn)
         if not identity_statements:
             continue
         boundary_statements = _collect_boundary_statements(graph, principal_arn)
-        grants = resolve_grants(identity_statements=identity_statements, boundary_statements=boundary_statements)
+        grants = resolve_grants(
+            identity_statements=identity_statements,
+            boundary_statements=boundary_statements,
+            scp_statements=scp_statements,
+        )
         if not grants:
             continue
         _materialize_effective_permissions(graph, principal_arn, grants, all_target_nodes)
 
     evaluate_trust_policies(graph)
+    evaluate_resource_policies(graph)

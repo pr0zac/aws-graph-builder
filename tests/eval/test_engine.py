@@ -197,3 +197,94 @@ def test_aws_managed_policy_with_no_document_is_skipped_gracefully() -> None:
         if data.get("type") == EdgeType.EFFECTIVE_PERMISSION.value and source == BOB_ARN
     ]
     assert bob_sources == []
+
+
+def test_s3_bucket_resource_policy_produces_effective_permission_edge() -> None:
+    """End-to-end: a bare `evaluate_iam_permissions(graph)` call must also
+    run resource-policy evaluation, materializing an `EffectivePermission`
+    edge from a bucket policy's Principal to the bucket -- not just from
+    identity-policy grants.
+    """
+    graph = _build_structural_graph()
+    bucket_arn = "arn:aws:s3:::deploy-artifacts"
+    add_node(
+        graph,
+        Node(
+            id=bucket_arn,
+            type=NodeType.S3_BUCKET,
+            name="deploy-artifacts",
+            arn=bucket_arn,
+            properties={
+                "bucket_policy": {
+                    "Statement": [
+                        {
+                            "Sid": "AllowBobGet",
+                            "Effect": "Allow",
+                            "Principal": {"AWS": BOB_ARN},
+                            "Action": "s3:GetObject",
+                            "Resource": f"{bucket_arn}/*",
+                        }
+                    ]
+                }
+            },
+        ),
+    )
+
+    evaluate_iam_permissions(graph)
+
+    resource_edges = [
+        (source, target, data)
+        for source, target, data in graph.edges(data=True)
+        if data.get("type") == EdgeType.EFFECTIVE_PERMISSION.value and source == BOB_ARN and target == bucket_arn
+    ]
+    assert len(resource_edges) == 1
+    props = resource_edges[0][2]["properties"]
+    assert props["actions"] == ["s3:GetObject"]
+    assert props["resource_pattern"] == f"{bucket_arn}/*"
+
+
+def test_scp_node_in_graph_restricts_materialized_grants() -> None:
+    """An SCP node present in the graph (via `AppliesSCP` from the Account,
+    per graph.builder.add_scp_policies_to_graph) restricts what
+    `evaluate_iam_permissions` materializes for a principal whose identity
+    policy would otherwise grant more.
+    """
+    graph = _build_structural_graph()
+    scp_arn = "arn:aws:organizations::111111111111:policy/o-example/service_control_policy/p-restrictive"
+    add_node(
+        graph,
+        Node(
+            id=scp_arn,
+            type=NodeType.SERVICE_CONTROL_POLICY,
+            name="RestrictToS3Only",
+            arn=scp_arn,
+            properties={
+                "content": {
+                    "Statement": [
+                        {"Effect": "Allow", "Action": "s3:*", "Resource": "*"},
+                    ]
+                }
+            },
+        ),
+    )
+    add_edge(
+        graph,
+        Edge(
+            id=make_edge_id(EdgeType.APPLIES_SCP, ACCOUNT_ARN, scp_arn),
+            type=EdgeType.APPLIES_SCP,
+            source=ACCOUNT_ARN,
+            target=scp_arn,
+        ),
+    )
+
+    evaluate_iam_permissions(graph)
+
+    # The role's inline policy grants iam:CreateAccessKey, which the SCP
+    # (only allowing s3:*) does not cover -- no EffectivePermission edges
+    # should be materialized for the role at all.
+    role_effective_permission_edges = [
+        (source, target)
+        for source, target, data in graph.edges(data=True)
+        if data.get("type") == EdgeType.EFFECTIVE_PERMISSION.value and source == ROLE_ARN
+    ]
+    assert role_effective_permission_edges == []

@@ -124,6 +124,84 @@ def test_f_unresolvable_condition_still_granted_but_flagged() -> None:
     assert grants[0].condition_unresolved is True
 
 
+def test_h_allow_plus_scp_that_also_allows_is_granted() -> None:
+    allow = _statement(effect="Allow", actions=["iam:CreateAccessKey"], resources=["*"])
+    scp_allow = _statement(effect="Allow", actions=["iam:CreateAccessKey"], resources=["*"], source="scp:policy-1")
+
+    grants = resolve_grants(identity_statements=[allow], boundary_statements=None, scp_statements=[scp_allow])
+
+    assert len(grants) == 1
+    assert grants[0].action_pattern == "iam:CreateAccessKey"
+
+
+def test_i_allow_plus_scp_without_the_action_is_not_granted() -> None:
+    # Mirrors test_e_...'s boundary-not-included case: an SCP, like a
+    # boundary, can only restrict -- a non-overlapping SCP allow set drops
+    # the grant entirely.
+    allow = _statement(effect="Allow", actions=["iam:CreateAccessKey"], resources=["*"])
+    scp_allow = _statement(effect="Allow", actions=["s3:GetObject"], resources=["*"], source="scp:policy-1")
+
+    grants = resolve_grants(identity_statements=[allow], boundary_statements=None, scp_statements=[scp_allow])
+
+    assert grants == []
+
+
+def test_j_scp_explicit_deny_drops_grant_even_though_identity_and_boundary_allow() -> None:
+    allow = _statement(
+        effect="Allow",
+        actions=["iam:CreateAccessKey"],
+        resources=["arn:aws:iam::111111111111:user/alice"],
+    )
+    boundary_allow = _statement(
+        effect="Allow",
+        actions=["iam:CreateAccessKey"],
+        resources=["arn:aws:iam::111111111111:user/alice"],
+        source=f"boundary:{BOUNDARY_ARN}",
+    )
+    scp_deny = _statement(
+        effect="Deny",
+        actions=["iam:CreateAccessKey"],
+        resources=["arn:aws:iam::111111111111:user/alice"],
+        source="scp:policy-1",
+    )
+
+    grants = resolve_grants(
+        identity_statements=[allow],
+        boundary_statements=[boundary_allow],
+        scp_statements=[scp_deny],
+    )
+
+    assert grants == []
+
+
+def test_k_multiple_attached_scps_allow_statements_union_correctly() -> None:
+    # A grant covered by SCP #2 but not SCP #1 still survives -- every
+    # attached SCP's Allow statements are unioned together before the
+    # overlap check, not intersected pairwise.
+    allow = _statement(effect="Allow", actions=["iam:CreateAccessKey"], resources=["*"])
+    scp_1_allow = _statement(effect="Allow", actions=["s3:GetObject"], resources=["*"], source="scp:policy-1")
+    scp_2_allow = _statement(effect="Allow", actions=["iam:CreateAccessKey"], resources=["*"], source="scp:policy-2")
+
+    grants = resolve_grants(
+        identity_statements=[allow],
+        boundary_statements=None,
+        scp_statements=[scp_1_allow, scp_2_allow],
+    )
+
+    assert len(grants) == 1
+    assert grants[0].action_pattern == "iam:CreateAccessKey"
+
+
+def test_l_scp_statements_none_skips_scp_filtering_entirely() -> None:
+    # Default behavior (no scp_statements passed) must be identical to
+    # before this parameter existed.
+    allow = _statement(effect="Allow", actions=["iam:CreateAccessKey"], resources=["*"])
+
+    grants = resolve_grants(identity_statements=[allow], boundary_statements=None)
+
+    assert len(grants) == 1
+
+
 def test_g_permission_query_can_and_evidence_against_hand_built_graph() -> None:
     graph = new_graph()
     add_node(graph, Node(id=ALICE_ARN, type=NodeType.IAM_USER, name="alice", arn=ALICE_ARN))
