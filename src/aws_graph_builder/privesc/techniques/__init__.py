@@ -16,6 +16,8 @@ from aws_graph_builder.privesc.techniques import (
     create_access_key,
     create_login_profile,
     create_policy_version,
+    pass_role_ec2,
+    pass_role_lambda,
     update_assume_role_policy,
 )
 
@@ -25,5 +27,7 @@ __all__ = [
     "create_access_key",
     "create_login_profile",
     "create_policy_version",
+    "pass_role_ec2",
+    "pass_role_lambda",
     "update_assume_role_policy",
 ]
