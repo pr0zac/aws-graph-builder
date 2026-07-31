@@ -47,6 +47,47 @@ def test_call_includes_disambiguator_in_report(tmp_path: Path) -> None:
 
 
 @mock_aws
+def test_call_with_ignore_error_codes_suppresses_gap_but_still_caches(tmp_path: Path) -> None:
+    """A real, common case: `lambda:GetPolicy` raises `ResourceNotFoundException`
+    for the (very common) function with no resource policy at all -- that's a
+    valid empty state, not a failure, and shouldn't clutter gap reporting.
+    """
+    lambda_client = boto3.client("lambda", region_name="us-east-1")
+    cache_store = CacheStore(tmp_path)
+    client = CachedClient(lambda_client, cache_store, scope="us-east-1", service="lambda")
+
+    response = client.call(
+        "get_policy",
+        {"FunctionName": "does-not-exist"},
+        ignore_error_codes=frozenset({"ResourceNotFoundException"}),
+    )
+
+    assert response is None
+    assert client.gaps == []  # suppressed, not recorded as a gap
+
+    cached = cache_store.get("us-east-1", "lambda", "get_policy")
+    assert cached is not None
+    assert cached.error is not None
+    assert cached.error["code"] == "ResourceNotFoundException"
+
+
+@mock_aws
+def test_call_without_ignore_error_codes_still_records_gap_for_same_error(tmp_path: Path) -> None:
+    """Confirm `ignore_error_codes` is opt-in per call -- omitting it keeps
+    the existing gap-recording behavior for the exact same error.
+    """
+    lambda_client = boto3.client("lambda", region_name="us-east-1")
+    cache_store = CacheStore(tmp_path)
+    client = CachedClient(lambda_client, cache_store, scope="us-east-1", service="lambda")
+
+    response = client.call("get_policy", {"FunctionName": "does-not-exist"})
+
+    assert response is None
+    assert len(client.gaps) == 1
+    assert client.gaps[0].error_code == "ResourceNotFoundException"
+
+
+@mock_aws
 def test_report_is_a_no_op_without_a_configured_reporter(tmp_path: Path) -> None:
     """No `reporter` given (the default, non-verbose path) must not raise --
     `report()` calls throughout `call()`/`paginate()` should just no-op.

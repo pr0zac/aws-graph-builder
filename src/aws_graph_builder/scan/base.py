@@ -131,11 +131,22 @@ class CachedClient:
         params: dict[str, Any] | None = None,
         *,
         disambiguator: str | None = None,
+        ignore_error_codes: frozenset[str] | None = None,
     ) -> dict[str, Any] | None:
         """Call a single (non-paginated) boto3 operation.
 
         Returns the raw response dict, or `None` if the call failed (in which
-        case a `ScanGap` was appended to `self.gaps`).
+        case a `ScanGap` was appended to `self.gaps` -- UNLESS the error's
+        code is in `ignore_error_codes`, for the common case of a botocore
+        "not found"-shaped error that actually represents a valid empty
+        state, not a failure (e.g. `lambda:GetPolicy`'s
+        `ResourceNotFoundException` when a function simply has no resource
+        policy, `s3:GetBucketPolicy`'s `NoSuchBucketPolicy`, or
+        `organizations:DescribeOrganization`'s
+        `AWSOrganizationsNotInUseException` when the account isn't in an
+        Organization at all). An ignored error is still cached (so `rebuild`
+        stays faithful to what AWS actually returned) but does not clutter
+        gap reporting with something that isn't really a problem.
         """
         self.report(f"{self._service}:{operation}" + (f" ({disambiguator})" if disambiguator else ""))
         params = dict(params) if params else {}
@@ -143,7 +154,7 @@ class CachedClient:
         try:
             response = method(**params)
         except ClientError as exc:
-            self._record_error(operation, params, exc, disambiguator=disambiguator)
+            self._record_error(operation, params, exc, disambiguator=disambiguator, ignore_error_codes=ignore_error_codes)
             return None
         except BotoCoreError as exc:
             raise CredentialError(
@@ -213,6 +224,7 @@ class CachedClient:
         exc: ClientError,
         *,
         disambiguator: str | None,
+        ignore_error_codes: frozenset[str] | None = None,
     ) -> None:
         error_code = exc.response.get("Error", {}).get("Code", "unknown")
         message = exc.response.get("Error", {}).get("Message", str(exc))
@@ -230,6 +242,9 @@ class CachedClient:
             ),
             disambiguator=disambiguator,
         )
+
+        if ignore_error_codes is not None and error_code in ignore_error_codes:
+            return
 
         if is_expired_credentials_error(exc):
             raise CredentialsExpiredError(
