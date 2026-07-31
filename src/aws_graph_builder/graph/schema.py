@@ -39,6 +39,10 @@ class NodeType(str, Enum):
     INSTANCE_PROFILE = "InstanceProfile"
     EXTERNAL_PRINCIPAL = "ExternalPrincipal"
     SERVICE_PRINCIPAL = "ServicePrincipal"
+    EC2_INSTANCE = "Ec2Instance"
+    LAMBDA_FUNCTION = "LambdaFunction"
+    S3_BUCKET = "S3Bucket"
+    SERVICE_CONTROL_POLICY = "ServiceControlPolicy"
 
 
 class EdgeType(str, Enum):
@@ -62,6 +66,8 @@ class EdgeType(str, Enum):
     # here so Phase 3's privesc/engine.py doesn't need to touch this enum;
     # nothing in Phase 2 populates this.
     PRIVESC_PATH = "PrivescPath"
+    EXECUTION_ROLE = "ExecutionRole"  # LambdaFunction -> IamRole
+    APPLIES_SCP = "AppliesSCP"  # Account -> ServiceControlPolicy
 
 
 @dataclass

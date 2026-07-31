@@ -25,7 +25,11 @@ from aws_graph_builder.graph.schema import (
     inline_policy_id,
     make_edge_id,
 )
+from aws_graph_builder.scan.ec2 import Ec2ScanResult
 from aws_graph_builder.scan.iam import IamScanResult
+from aws_graph_builder.scan.lambda_ import LambdaScanResult
+from aws_graph_builder.scan.organizations import OrganizationsScanResult
+from aws_graph_builder.scan.s3 import S3ScanResult
 
 
 def _name_from_arn(arn: str) -> str:
@@ -306,3 +310,147 @@ def build_iam_graph(scan_result: IamScanResult, *, account_id: str) -> nx.MultiD
         )
 
     return graph
+
+
+_EC2_INSTANCE_EXCLUDED_KEYS = {"InstanceId"}
+_LAMBDA_FUNCTION_EXCLUDED_KEYS = {"FunctionArn", "FunctionName"}
+_S3_BUCKET_EXCLUDED_KEYS = {"Name"}
+_SCP_EXCLUDED_KEYS = {"Arn", "Name"}
+
+
+def add_ec2_instances_to_graph(graph: nx.MultiDiGraph, scan_result: Ec2ScanResult, *, account_id: str) -> None:
+    """Mutate `graph` in place, adding an `Ec2Instance` node for every
+    instance in `scan_result`, plus an `AttachedTo` edge from its
+    `InstanceProfile` node (already created by `build_iam_graph`) when the
+    instance has one attached.
+
+    Region-scoped like `Ec2ScanResult` itself -- the caller runs this once
+    per enabled region. ARN construction happens here (not in the scanner)
+    since it needs `account_id`, which the scanner deliberately doesn't know.
+    """
+    for instance in scan_result.instances:
+        instance_id = instance["InstanceId"]
+        arn = f"arn:aws:ec2:{scan_result.region}:{account_id}:instance/{instance_id}"
+        add_node(
+            graph,
+            Node(
+                id=arn,
+                type=NodeType.EC2_INSTANCE,
+                name=instance_id,
+                arn=arn,
+                properties=_properties_excluding(instance, _EC2_INSTANCE_EXCLUDED_KEYS),
+            ),
+        )
+
+        profile = instance.get("IamInstanceProfile")
+        if not profile:
+            continue
+        profile_arn = profile.get("Arn")
+        if profile_arn is None or profile_arn not in graph.nodes:
+            continue
+        add_edge(
+            graph,
+            Edge(
+                id=make_edge_id(EdgeType.ATTACHED_TO, profile_arn, arn),
+                type=EdgeType.ATTACHED_TO,
+                source=profile_arn,
+                target=arn,
+            ),
+        )
+
+
+def add_lambda_functions_to_graph(graph: nx.MultiDiGraph, scan_result: LambdaScanResult) -> None:
+    """Mutate `graph` in place, adding a `LambdaFunction` node for every
+    function in `scan_result`, plus an `ExecutionRole` edge to its `IamRole`
+    node (already created by `build_iam_graph`) when that role is present in
+    the graph.
+
+    The function's raw resource policy (or `None`) is stored on the node's
+    properties for a later phase's `eval/resource_policy.py` to consume --
+    not evaluated here, mirroring how `build_iam_graph` stores
+    `AssumeRolePolicyDocument` raw for `eval/trust.py`.
+
+    Region-scoped like `LambdaScanResult` itself -- the caller runs this once
+    per enabled region.
+    """
+    for function in scan_result.functions:
+        arn = function["FunctionArn"]
+        name = function.get("FunctionName", arn)
+        properties = _properties_excluding(function, _LAMBDA_FUNCTION_EXCLUDED_KEYS)
+        properties["resource_policy"] = scan_result.resource_policies.get(arn)
+        add_node(
+            graph,
+            Node(id=arn, type=NodeType.LAMBDA_FUNCTION, name=name, arn=arn, properties=properties),
+        )
+
+        role_arn = function.get("Role")
+        if role_arn is None or role_arn not in graph.nodes:
+            continue
+        add_edge(
+            graph,
+            Edge(
+                id=make_edge_id(EdgeType.EXECUTION_ROLE, arn, role_arn),
+                type=EdgeType.EXECUTION_ROLE,
+                source=arn,
+                target=role_arn,
+            ),
+        )
+
+
+def add_s3_buckets_to_graph(graph: nx.MultiDiGraph, scan_result: S3ScanResult) -> None:
+    """Mutate `graph` in place, adding an `S3Bucket` node for every bucket in
+    `scan_result`. No edges are created here -- resource-policy-derived
+    `EffectivePermission` edges are a later phase's concern.
+
+    S3 bucket ARNs have no account/region segment (a real, documented AWS
+    quirk), so the id is constructed as `arn:aws:s3:::<bucket-name>` rather
+    than reusing the account-id/region-aware scheme used elsewhere.
+
+    Global, like `S3ScanResult` itself -- the caller runs this once, not per
+    region.
+    """
+    for bucket in scan_result.buckets:
+        name = bucket["Name"]
+        arn = f"arn:aws:s3:::{name}"
+        properties = _properties_excluding(bucket, _S3_BUCKET_EXCLUDED_KEYS)
+        properties["region"] = scan_result.bucket_locations.get(name)
+        properties["bucket_policy"] = scan_result.bucket_policies.get(name)
+        properties["acl"] = scan_result.bucket_acls.get(name)
+        add_node(
+            graph,
+            Node(id=arn, type=NodeType.S3_BUCKET, name=name, arn=arn, properties=properties),
+        )
+
+
+def add_scp_policies_to_graph(graph: nx.MultiDiGraph, scan_result: OrganizationsScanResult, *, account_id: str) -> None:
+    """Mutate `graph` in place, adding a `ServiceControlPolicy` node for
+    every SCP in `scan_result`, plus an `AppliesSCP` edge from the `Account`
+    node (already created by `build_iam_graph`, whose id this function
+    reconstructs the same way `build_iam_graph` does) to each policy.
+
+    Does nothing if `scan_result.in_organization` is `False` -- there are no
+    SCPs to add. Global, like `OrganizationsScanResult` itself -- the caller
+    runs this once, not per region.
+    """
+    if not scan_result.in_organization:
+        return
+
+    account_arn = f"arn:aws:iam::{account_id}:root"
+    for policy in scan_result.policies:
+        arn = policy["Arn"]
+        name = policy.get("Name", arn)
+        properties = _properties_excluding(policy, _SCP_EXCLUDED_KEYS)
+        properties["content"] = scan_result.policy_documents.get(policy["Id"])
+        add_node(
+            graph,
+            Node(id=arn, type=NodeType.SERVICE_CONTROL_POLICY, name=name, arn=arn, properties=properties),
+        )
+        add_edge(
+            graph,
+            Edge(
+                id=make_edge_id(EdgeType.APPLIES_SCP, account_arn, arn),
+                type=EdgeType.APPLIES_SCP,
+                source=account_arn,
+                target=arn,
+            ),
+        )
