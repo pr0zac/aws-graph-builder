@@ -1,6 +1,6 @@
 # aws-graph-builder
 
-A command-line tool that scans an AWS account with read-only credentials and builds an **attack-path / privilege-escalation graph**: not just an inventory of IAM users, roles, groups, policies, EC2 instances, Lambda functions, and S3 buckets, but an *evaluated* graph of who can actually do what to whom — including detection of known IAM privilege-escalation techniques — serialized to JSON for downstream analysis or visualization.
+A command-line tool that scans an AWS account with read-only credentials and builds an **attack-path / privilege-escalation graph**: not just an inventory of IAM users, roles, groups, policies, EC2 instances, Lambda functions, and S3 buckets, but an *evaluated* graph of who can actually do what to whom — including detection of known IAM privilege-escalation techniques — serialized to JSON for downstream analysis, or explored directly with the built-in local web visualizer (`serve`).
 
 Similar in spirit to tools like PMapper and Cartography. Read-only, defensive: intended to be run by an account owner (or an authorized security assessor) against their own AWS account.
 
@@ -65,6 +65,25 @@ Emits the minimal least-privilege read-only IAM policy that `scan` needs, aggreg
 ```bash
 uv run aws-graph-builder permissions --output scan-policy.json
 ```
+
+### `serve`
+
+Launches a local, offline web visualizer over a previously-written `graph.json` — **no AWS calls, no credentials needed at all**, the same offline contract as `rebuild`.
+
+```bash
+uv run aws-graph-builder serve --input graph.json
+```
+
+This starts a local web server and opens the visualizer in your default browser. It renders the full graph interactively — pan/zoom, nodes colored/shaped by type, edges styled by attack-path severity (critical `PrivescPath`, serious `CanAssume`, structural everything else — `EffectivePermission` is hidden by default since it can run into the thousands on a real scan) — alongside a legend, a findings panel (filterable by severity, click a finding to pan/zoom to it and highlight its evidence edges), and a node/edge inspector (click anything for full detail, including raw policy documents). The server also exposes a JSON API for programmatic queries against the loaded graph: `GET /api/graph`, `/api/node`, `/api/edge`, `/api/findings`, general-reachability `/api/paths?source=&target=&max_hops=`, and `/api/attack-paths` — the same query restricted to just the edges that mean "traversing this gets you control of the target principal" (`CanAssume`/`PrivescPath`), including an `?target=high_value` sentinel that finds paths to any detected high-value principal (`/api/high-value-principals` lists them — an `IamUser`/`IamRole` with an unrestricted, `Resource: "*"` + `*`/`iam:*` grant, the AWS equivalent of BloodHound's Domain Admins).
+
+Useful flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--input PATH` | Path to the `graph.json` document to serve, written by `scan` or `rebuild` (default `graph.json`) |
+| `--host NAME` | Host to bind the local web server to (default `127.0.0.1`) |
+| `--port PORT` | Port to bind the local web server to (default `8765`) |
+| `--open` / `--no-open` | Whether to automatically open the visualizer in the default browser (default: open) |
 
 ## Output format
 
