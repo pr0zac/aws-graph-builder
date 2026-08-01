@@ -1,5 +1,41 @@
 "use strict";
 
+/* -----------------------------------------------------------------------
+   Manual theme override (System / Light / Dark), layered on top of the
+   OS-driven prefers-color-scheme default below. style.css's
+   :root[data-theme="dark"] / :root[data-theme="light"] blocks were added
+   specifically for this control and already define every custom property
+   consistently with the base :root / prefers-color-scheme blocks -- so
+   applying data-theme here is a pure-CSS repaint, no new color values.
+
+   "System" is represented as the ABSENCE of a stored preference/attribute
+   (not a third stored value) so a user who never touches the control gets
+   exactly today's behavior: no data-theme attribute is ever set, and the
+   prefers-color-scheme media query in style.css keeps working unmodified.
+
+   Applied at module load time -- before main() runs, and therefore before
+   its first buildCyStyle() call -- so cssVar()'s getComputedStyle() reads
+   already reflect the stored preference on first paint, rather than
+   flashing the OS default and then correcting a moment later.
+   ----------------------------------------------------------------------- */
+const THEME_STORAGE_KEY = "aws-graph-builder-theme";
+
+function getStoredTheme() {
+  const v = localStorage.getItem(THEME_STORAGE_KEY);
+  return v === "light" || v === "dark" ? v : null;
+}
+
+function applyStoredTheme() {
+  const stored = getStoredTheme();
+  if (stored) {
+    document.documentElement.setAttribute("data-theme", stored);
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+}
+
+applyStoredTheme();
+
 /* =======================================================================
    aws-graph-builder visualizer -- graph render view.
 
@@ -108,6 +144,30 @@ const EDGE_SEVERITY_STYLE = {
 // thousands of edges on a real scan, so it's hidden behind a toggle
 // (default off) rather than merely thinned further.
 const HIDDEN_BY_DEFAULT_EDGE_TYPES = new Set(["EffectivePermission"]);
+
+/* -----------------------------------------------------------------------
+   AWS-default node classification: nodes that are always AWS-owned
+   plumbing, never a customer-created resource, and clutter real scans
+   (service-linked roles, AWS managed policies, and the ServicePrincipal
+   leaves trust policies create for AWS services like ec2.amazonaws.com).
+   Hidden by default (see the toggle-aws-default-input wiring in main()).
+
+   Deliberately does NOT match anything under "/aws-reserved/" in the ARN
+   path (e.g. AWSReservedSSO_* roles from IAM Identity Center) -- those are
+   real, currently-assumable access and exactly what this tool exists to
+   surface, not background AWS plumbing.
+
+   A pure function of node data (as stored in a Cytoscape node's data(),
+   same id/type/arn shape used throughout this file) so it's trivially
+   reusable for both the initial element-build pass and the live toggle.
+   ----------------------------------------------------------------------- */
+function isAwsDefaultNode(nodeData) {
+  if (nodeData.type === "ServicePrincipal") return true;
+  const arn = nodeData.arn || "";
+  if (arn.startsWith("arn:aws:iam::aws:policy/")) return true;
+  if (arn.includes(":role/aws-service-role/")) return true;
+  return false;
+}
 
 /* -----------------------------------------------------------------------
    Finding severity tiers, from /api/findings -- a distinct scale from
@@ -242,6 +302,31 @@ function buildCyStyle() {
 
   style.push({
     selector: ".ge-hidden",
+    style: { display: "none" },
+  });
+
+  // AWS-default node visibility toggle (see isAwsDefaultNode and the
+  // toggle-aws-default-input wiring in main()) -- a separate class from
+  // .ge-hidden above since the two toggles are independent, but the same
+  // display:none mechanism. Applied only to nodes: Cytoscape already
+  // treats an edge as hidden whenever either endpoint node is
+  // display:none'd (verified live), so incident edges need no class of
+  // their own.
+  style.push({
+    selector: ".node-hidden",
+    style: { display: "none" },
+  });
+
+  // Isolate/focus-zoom (see applyIsolate/restoreIsolate in main()): added
+  // to every element NOT part of the currently-focused finding/path-query
+  // result while a focus is active. Independent of, and layered on top of,
+  // .ge-hidden/.node-hidden above -- an element can carry any/all three
+  // classes at once, display:none is idempotent across them, and each
+  // toggle's own on/off state is preserved underneath (see clearFocus/
+  // clearPathQueryHighlight, which reconcile .ge-hidden/.node-hidden
+  // independently of isolate cleanup).
+  style.push({
+    selector: ".isolate-hidden",
     style: { display: "none" },
   });
 
@@ -434,6 +519,19 @@ async function main() {
     return;
   }
 
+  // AWS-default nodes (see isAwsDefaultNode) are hidden by default, same
+  // convention as HIDDEN_BY_DEFAULT_EDGE_TYPES above -- computed once as an
+  // id set for cheap lookups elsewhere (toggle handler, focus reveal).
+  //
+  // Only NODES get the "node-hidden" class, never edges: verified live in
+  // a real browser (via a standalone cytoscape instance in devtools) that
+  // Cytoscape already treats an edge as hidden whenever either endpoint
+  // node is display:none'd -- ele.hidden()/.visible() come back
+  // true/false accordingly even though the edge's own computed style is
+  // untouched. Classing edges too would just be redundant state to keep
+  // in sync (and to get wrong).
+  const awsDefaultNodeIds = new Set(data.nodes.filter(isAwsDefaultNode).map((n) => n.id));
+
   const elements = {
     nodes: data.nodes.map((n) => ({
       data: {
@@ -445,6 +543,7 @@ async function main() {
         label: truncateLabel(n.name),
         high_value: !!n.high_value,
       },
+      classes: awsDefaultNodeIds.has(n.id) ? "node-hidden" : "",
     })),
     edges: data.edges.map((e) => ({
       data: {
@@ -498,17 +597,22 @@ async function main() {
   // edges at once (e.g. both AttachedPolicy and CanAssume between the same
   // principal/policy), and cose's spring model sums attraction per edge,
   // so those pairs were getting pulled together several times as hard as
-  // everywhere else. All original edges are still rendered -- this only
-  // changes what the layout algorithm sees.
-  function layoutElements(cy) {
+  // everywhere else. All original edges (within `eles`) are still
+  // rendered -- this only changes what the layout algorithm sees.
+  //
+  // Takes an explicit element collection rather than always `cy.elements()`
+  // so isolate mode (see applyIsolate below) can scope a relayout to just
+  // the currently-visible (non-isolate-hidden) subset instead of the whole
+  // graph.
+  function layoutElements(eles) {
     const seenPairs = new Set();
-    const dedupedEdges = cy.edges().filter((e) => {
+    const dedupedEdges = eles.edges().filter((e) => {
       const key = [e.data("source"), e.data("target")].sort().join("|");
       if (seenPairs.has(key)) return false;
       seenPairs.add(key);
       return true;
     });
-    return cy.nodes().union(dedupedEdges);
+    return eles.nodes().union(dedupedEdges);
   }
 
   const cy = cytoscape({
@@ -517,8 +621,16 @@ async function main() {
     style: buildCyStyle(),
   });
 
+  // Scoped to the currently-visible (non-isolate-hidden) elements rather
+  // than unconditionally `cy.elements()`: when a finding/path-query focus
+  // has isolated the canvas down to a subset (see applyIsolate below), the
+  // "Re-run layout" button (wired to this same function) should only
+  // reshuffle that visible subset, not silently reveal everything else.
+  // When no isolate is active, no element carries .isolate-hidden, so this
+  // is simply every element -- behavior is unchanged from before isolate
+  // mode existed.
   function runLayout() {
-    layoutElements(cy).layout(coseLayoutOptions()).run();
+    layoutElements(cy.elements().not(".isolate-hidden")).layout(coseLayoutOptions()).run();
   }
 
   runLayout();
@@ -540,8 +652,73 @@ async function main() {
   let severityFilterSet = new Set(FINDING_SEVERITY_ORDER);
   let focusedEdgeEles = cy.collection();
   let focusedNodeEles = cy.collection();
+  // Nodes force-revealed by focusFinding because they're an AWS-default
+  // node caught up in a finding's evidence chain (e.g. an evidence edge's
+  // endpoint) but NOT one of the finding's own source/target -- tracked
+  // separately from focusedNodeEles since those get the --focus-highlight
+  // border treatment below and these don't (they're just made visible).
+  let focusedAwsDefaultNodeEles = cy.collection();
   let pulseIntervalId = null;
   let pulseOn = false;
+
+  // -----------------------------------------------------------------------
+  // Isolate/focus-zoom: when a finding or path-query result is focused
+  // (see focusFinding/applyPathQueryHighlight below), hide everything
+  // outside the focused subset and relayout just that subset so it gets
+  // the whole canvas, then restore the EXACT prior view (positions +
+  // pan/zoom, not a fresh cose reshuffle -- cose isn't deterministic) once
+  // focus clears. Shared by both focus mechanisms (findings-panel clicks
+  // and attack-path query results), which are otherwise independent and
+  // mutually exclusive (see clearAllFocus).
+  // -----------------------------------------------------------------------
+  let isolateSnapshot = null; // { positions: Map<id,{x,y}>, pan: {x,y}, zoom: number } | null
+
+  // Only captures a snapshot if one isn't already pending. If a second
+  // finding/path-query is focused while the first is still isolated,
+  // focusFinding/applyPathQueryHighlight's own clearAllFocus() call (at
+  // their very start, below) already runs restoreIsolate() first --
+  // putting the graph fully back to its true pre-isolation positions/
+  // pan/zoom and clearing isolateSnapshot to null -- before this is ever
+  // reached again. So by the time a new isolate needs a snapshot, it's
+  // always capturing the real original state, never an intermediate
+  // isolated one.
+  function snapshotViewIfNeeded() {
+    if (isolateSnapshot !== null) return;
+    const positions = new Map();
+    cy.nodes().forEach((n) => positions.set(n.id(), { ...n.position() }));
+    isolateSnapshot = { positions, pan: { ...cy.pan() }, zoom: cy.zoom() };
+  }
+
+  // Hides everything except keepVisibleEles and relayouts just that
+  // visible subset (reusing runLayout(), which is already scoped to
+  // non-.isolate-hidden elements) so it fills the canvas. Callers must
+  // force-reveal (removeClass "ge-hidden"/"node-hidden") anything in
+  // keepVisibleEles that those toggles would otherwise hide BEFORE calling
+  // this, and should apply their own highlight styling AFTER, so it isn't
+  // wiped/reordered by the relayout.
+  function applyIsolate(keepVisibleEles) {
+    snapshotViewIfNeeded();
+    cy.elements().difference(keepVisibleEles).addClass("isolate-hidden");
+    runLayout();
+  }
+
+  // Removes isolate-hidden from every element (not just keepVisibleEles --
+  // there is no such reference here, and none is needed) and restores
+  // every node's exact cached position plus pan/zoom. A no-op if no
+  // isolate is currently active, so it's safe to call unconditionally from
+  // both clearFocus() and clearPathQueryHighlight() below -- whichever one
+  // corresponds to the actually-active isolate (if any) does the real
+  // work; the other is a harmless no-op.
+  function restoreIsolate() {
+    if (isolateSnapshot === null) return;
+    cy.elements().removeClass("isolate-hidden");
+    cy.nodes().forEach((n) => {
+      const pos = isolateSnapshot.positions.get(n.id());
+      if (pos) n.position(pos);
+    });
+    cy.viewport({ pan: isolateSnapshot.pan, zoom: isolateSnapshot.zoom });
+    isolateSnapshot = null;
+  }
 
   function clearFocus() {
     if (pulseIntervalId !== null) {
@@ -558,9 +735,27 @@ async function main() {
     if (toggle && !toggle.checked) {
       focusedEdgeEles.filter((e) => HIDDEN_BY_DEFAULT_EDGE_TYPES.has(e.data("type"))).addClass("ge-hidden");
     }
+    // Same idea for AWS-default nodes force-revealed by focusFinding (see
+    // isAwsDefaultNode) -- re-hide them if that toggle is off, so clearing
+    // focus doesn't leave AWS-default plumbing permanently visible against
+    // the user's toggle choice. Their incident edges need no separate
+    // handling here: Cytoscape auto-hides an edge once its endpoint node
+    // is display:none'd again (see the .node-hidden stylesheet comment).
+    const awsDefaultToggle = document.getElementById("toggle-aws-default-input");
+    if (awsDefaultToggle && !awsDefaultToggle.checked) {
+      focusedAwsDefaultNodeEles.addClass("node-hidden");
+    }
     focusedNodeEles.removeStyle();
     focusedEdgeEles = cy.collection();
     focusedNodeEles = cy.collection();
+    focusedAwsDefaultNodeEles = cy.collection();
+    // Isolate-mode cleanup: restore whatever isolate is currently active
+    // (if any) to its exact pre-isolation view. Must run after the
+    // ge-hidden/node-hidden reconciliation above, not instead of it --
+    // those two classes are independent of .isolate-hidden and still need
+    // to end up correctly applied per the user's toggle choices once the
+    // isolate-hidden veil itself is lifted.
+    restoreIsolate();
   }
 
   function focusFinding(finding) {
@@ -569,9 +764,6 @@ async function main() {
     const srcEle = cy.getElementById(finding.source);
     const tgtEle = cy.getElementById(finding.target);
     const frameEles = srcEle.union(tgtEle);
-    if (!frameEles.empty()) {
-      cy.fit(frameEles, 80);
-    }
 
     const edgeIdSet = new Set([finding.edge_id, ...(finding.evidence_edges || [])]);
     let edgeEles = cy.collection();
@@ -580,6 +772,38 @@ async function main() {
       if (!ele.empty()) edgeEles = edgeEles.union(ele);
     }
     edgeEles.removeClass("ge-hidden");
+
+    // Every node touched by the finding itself or its evidence edges --
+    // not just source/target, since evidence edges can route through
+    // intermediate nodes that also need to stay visible (Cytoscape hides
+    // an edge whenever either endpoint node is display:none'd). This is
+    // the full "keep visible" set isolate mode below hides everything
+    // else relative to.
+    let touchedNodes = frameEles;
+    edgeEles.forEach((e) => {
+      touchedNodes = touchedNodes.union(cy.getElementById(e.data("source"))).union(cy.getElementById(e.data("target")));
+    });
+
+    // AWS-default toggle interaction: force-reveal any AWS-default node
+    // touched by the finding or its evidence chain, so the highlight below
+    // is actually visible even when the "Show AWS-default nodes" toggle is
+    // off -- the edges themselves need no separate reveal, since Cytoscape
+    // already renders an edge once both its endpoint nodes are visible
+    // (see isAwsDefaultNode's comment). Re-hidden by clearFocus() above
+    // once focus clears.
+    const awsDefaultRevealNodes = touchedNodes.filter((n) => awsDefaultNodeIds.has(n.id()));
+    awsDefaultRevealNodes.removeClass("node-hidden");
+    focusedAwsDefaultNodeEles = awsDefaultRevealNodes;
+
+    // Isolate mode: hide everything outside the finding's frame/evidence
+    // chain and relayout just that subset to fill the canvas. Must run
+    // after the ge-hidden/node-hidden force-reveals above (an element
+    // still classed ge-hidden/node-hidden stays display:none even once
+    // isolate-hidden is withheld from it) and before the highlight styling
+    // below, which is applied after the relayout so it isn't wiped/
+    // reordered by it.
+    const keepVisible = touchedNodes.union(edgeEles);
+    if (!keepVisible.empty()) applyIsolate(keepVisible);
 
     const focusColor = cssVar("--focus-highlight");
     edgeEles.style({
@@ -821,9 +1045,28 @@ async function main() {
     if (effPermToggle && !effPermToggle.checked) {
       pathQueryEdgeEles.filter((e) => HIDDEN_BY_DEFAULT_EDGE_TYPES.has(e.data("type"))).addClass("ge-hidden");
     }
+    // Same idea for AWS-default nodes force-revealed by
+    // applyPathQueryHighlight (see isAwsDefaultNode) -- re-hide them if
+    // that toggle is off, mirroring the EffectivePermission handling above.
+    // pathQueryNodeEles already contains every node in the result (not
+    // just source/target), so this alone covers all revealed endpoints;
+    // their incident edges auto-hide again once the node does (see the
+    // .node-hidden stylesheet comment), no separate edge handling needed.
+    const awsDefaultToggle = document.getElementById("toggle-aws-default-input");
+    if (awsDefaultToggle && !awsDefaultToggle.checked) {
+      pathQueryNodeEles.filter((n) => awsDefaultNodeIds.has(n.id())).addClass("node-hidden");
+    }
     pathQueryNodeEles.removeStyle();
     pathQueryEdgeEles = cy.collection();
     pathQueryNodeEles = cy.collection();
+    // Isolate-mode cleanup: restore whatever isolate is currently active
+    // (if any) to its exact pre-isolation view. This must happen here too
+    // (not only inside clearFocus()) since this function can be reached
+    // directly -- the pathquery-clear-btn handler below calls it without
+    // going through clearAllFocus()/clearFocus() at all. restoreIsolate()
+    // is a no-op if nothing is isolated, so calling it unconditionally
+    // from both clear paths is safe.
+    restoreIsolate();
     // A stale "N paths found" summary with nothing actually highlighted
     // anymore (e.g. after a finding click took over the highlight) reads
     // as broken -- clear it along with the highlight itself. Skipped when
@@ -875,6 +1118,25 @@ async function main() {
     // visible so the highlight itself isn't invisible, mirroring
     // focusFinding's handling of the same toggle.
     edgeEles.removeClass("ge-hidden");
+    // Same idea for AWS-default nodes (see isAwsDefaultNode) -- a path can
+    // legitimately route through e.g. a service-linked role. nodeEles here
+    // is already every node touched by any returned path (not just
+    // source/target), so this covers all revealed endpoints; their
+    // incident edges become visible automatically once both endpoints are
+    // (see the .node-hidden stylesheet comment).
+    nodeEles.removeClass("node-hidden");
+
+    // Isolate mode: hide everything outside the result subset and
+    // relayout just that subset to fill the canvas (same pattern as
+    // focusFinding above). nodeEles already covers every node touched by
+    // any returned path, so union with edgeEles is the full keep-visible
+    // set. Must run after the force-reveals above and before the
+    // highlight styling below, applied after the relayout so it isn't
+    // wiped/reordered by it -- this also replaces the plain cy.fit() this
+    // function used to do, since applyIsolate's relayout already fits the
+    // viewport to the visible subset.
+    const keepVisible = nodeEles.union(edgeEles);
+    if (!keepVisible.empty()) applyIsolate(keepVisible);
 
     const color = cssVar("--path-highlight");
     edgeEles.style({
@@ -890,8 +1152,6 @@ async function main() {
 
     pathQueryEdgeEles = edgeEles;
     pathQueryNodeEles = nodeEles;
-
-    if (!nodeEles.empty()) cy.fit(nodeEles, 80);
 
     return { nodeCount: nodeIds.size, edgeCount: edgeIds.size };
   }
@@ -1047,14 +1307,82 @@ async function main() {
     }
   });
 
+  // AWS-default node visibility toggle (default off, per isAwsDefaultNode /
+  // awsDefaultNodeIds above) -- only the nodes need the class toggled;
+  // Cytoscape already treats their incident edges as hidden once a
+  // connected node is (verified live via a standalone cytoscape instance:
+  // ele.hidden() came back true for an edge whose endpoint had
+  // display:none, even though the edge's own style was untouched), so
+  // there's no separate edge set to manage here.
+  const awsDefaultToggle = document.getElementById("toggle-aws-default-input");
+  awsDefaultToggle.checked = false;
+  awsDefaultToggle.addEventListener("change", () => {
+    const nodes = cy.nodes().filter((n) => awsDefaultNodeIds.has(n.id()));
+    if (awsDefaultToggle.checked) {
+      nodes.removeClass("node-hidden");
+    } else {
+      nodes.addClass("node-hidden");
+    }
+  });
+
   document.getElementById("layout-rerun-btn").addEventListener("click", runLayout);
 
   // Node-category colors differ between light/dark; edge severity colors
   // are fixed and don't need to change, but re-applying the whole
   // stylesheet on scheme flips is simplest and cheap at this graph size.
+  //
+  // This fires on every OS scheme change regardless of whether a manual
+  // override is currently active. That's intentional, not an oversight: if
+  // data-theme is set, style.css's :root[data-theme=...] blocks outrank the
+  // prefers-color-scheme media query on specificity, so cssVar() resolves
+  // to the SAME override colors either way -- the rebuild below is just a
+  // harmless no-op while an override is active, and is exactly what's
+  // needed to repaint the canvas for a "System"-mode user whose OS setting
+  // changes while the page is open.
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     cy.style(buildCyStyle()).update();
   });
+
+  // -----------------------------------------------------------------------
+  // Manual theme toggle: a 3-state System -> Light -> Dark -> System cycle
+  // button (see THEME_STORAGE_KEY/applyStoredTheme above, run once at
+  // module load before this function's first buildCyStyle() call). Picking
+  // Light/Dark sets data-theme + persists to localStorage; picking System
+  // clears both, falling back to the OS's prefers-color-scheme setting via
+  // the listener above. Every transition rebuilds the Cytoscape stylesheet
+  // itself (not just relying on the CSS repaint) since node/edge colors are
+  // baked into cy's style at buildCyStyle()-call time -- same reason the
+  // OS-change listener above needs to do it.
+  // -----------------------------------------------------------------------
+  const THEME_CYCLE = ["system", "light", "dark"];
+  const THEME_LABEL = { system: "System", light: "Light", dark: "Dark" };
+  const themeToggleBtn = document.getElementById("theme-toggle-btn");
+  const themeToggleLabel = document.getElementById("theme-toggle-label");
+
+  function currentThemeMode() {
+    return getStoredTheme() || "system";
+  }
+
+  function renderThemeToggle() {
+    const mode = currentThemeMode();
+    themeToggleLabel.textContent = THEME_LABEL[mode];
+    themeToggleBtn.setAttribute("aria-label", `Color theme: ${THEME_LABEL[mode]} (click to change)`);
+  }
+
+  themeToggleBtn.addEventListener("click", () => {
+    const next = THEME_CYCLE[(THEME_CYCLE.indexOf(currentThemeMode()) + 1) % THEME_CYCLE.length];
+    if (next === "system") {
+      localStorage.removeItem(THEME_STORAGE_KEY);
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+      document.documentElement.setAttribute("data-theme", next);
+    }
+    renderThemeToggle();
+    cy.style(buildCyStyle()).update();
+  });
+
+  renderThemeToggle();
 }
 
 main();

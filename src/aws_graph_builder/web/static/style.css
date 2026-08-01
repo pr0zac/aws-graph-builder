@@ -182,6 +182,33 @@ body {
   background: var(--border-hairline);
 }
 
+/* Manual theme override control -- same visual weight as #layout-rerun-btn
+   (it's another topbar action button), just with a dynamic label reflecting
+   the current mode (System/Light/Dark). See app.js's THEME_* constants. */
+#theme-toggle-btn {
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-primary);
+  background: transparent;
+  border: 1px solid var(--border-ring);
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+
+#theme-toggle-btn:hover {
+  background: var(--border-hairline);
+}
+
+#theme-toggle-label {
+  font-weight: 600;
+  /* Fixed-ish width so the button doesn't visibly resize/jitter as the
+     label cycles between "System" / "Light" / "Dark". */
+  display: inline-block;
+  min-width: 3.6em;
+  text-align: left;
+}
+
 /* ---------------------------------------------------------------------
    Main layout: graph canvas + sidebar
    --------------------------------------------------------------------- */
