@@ -61,5 +61,12 @@ Tracks implementation progress against the phased build order in `aws-graph-buil
 - [x] `README.md` with usage instructions
 - [x] Verified `rebuild` reproduces the same graph from cache with zero AWS API calls: real scan against the Cloudfoxable sandbox (111 nodes / 2585 edges / 188 findings) followed by `rebuild` from that cache with **all AWS credential env vars unset** and, in the test suite, `botocore`'s `_make_api_call` itself blocked — node ids, edge ids, and findings all identical between the two runs
 
+## Post-v1 — Additional privesc detectors (Rhino Security Labs catalog gap-fill)
+- [x] `set_default_policy_version` — `iam:SetDefaultPolicyVersion` against `ManagedPolicy` nodes; same shape as `create_policy_version` but activates a *retained* historical version rather than a newly created one
+- [x] `pass_role_cloudformation` — `iam:PassRole` + `cloudformation:CreateStack` against `IamRole` nodes; same shape/mechanism as `pass_role_ec2`/`pass_role_lambda` (the `Resource: "*"` wildcard-matching trick generalizes to any create-with-role action)
+- [x] `lambda_update_function_code` — `lambda:UpdateFunctionCode` against an existing `LambdaFunction` node, traversing its `ExecutionRole` edge to the `IamRole` whose permissions are inherited; the first detector with a different shape than the PassRole-based ones (no PassRole check, target found via graph traversal of an existing resource instead of an action check against the role itself)
+- [x] Tests: 3 new test modules (10 new tests total), full suite 228/228 passing, ruff/mypy clean
+- Catalog now covers 11 of the 21 methods enumerated at https://rhinosecuritylabs.com/aws/aws-privilege-escalation-methods-mitigation/ (the rest — Glue Dev Endpoint create/update, Data Pipeline — need a new resource scanner or have low real-world value since AWS closed Data Pipeline to new customers in 2024)
+
 ## Deferred (not v1)
 - [ ] Phase 2 (network): SecurityGroup/Vpc/Subnet/NetworkInterface/LoadBalancer/RouteTable/InternetGateway nodes, AllowsIngress/AllowsEgress/Routes/ExposesToInternet edges
