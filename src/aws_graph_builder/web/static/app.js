@@ -330,6 +330,19 @@ function buildCyStyle() {
     style: { display: "none" },
   });
 
+  // User-driven per-node hide (see hideNodes/showHiddenNode/
+  // showAllHiddenNodes and userHiddenNodeIds in main()) -- independent of
+  // .ge-hidden/.node-hidden above (no toggle governs it; userHiddenNodeIds
+  // itself is the source of truth for which nodes carry this class) and of
+  // .isolate-hidden (a user-hidden node touched by a focused finding/path is
+  // force-revealed for the duration of that focus -- see focusFinding/
+  // applyPathQueryHighlight). Same idempotent display:none stacking as the
+  // other three classes.
+  style.push({
+    selector: ".user-hidden",
+    style: { display: "none" },
+  });
+
   return style;
 }
 
@@ -640,6 +653,119 @@ async function main() {
   const hoverTooltip = setupHoverTooltip(cy, document.getElementById("cy"));
 
   // -----------------------------------------------------------------------
+  // User-driven per-node hide/show: lets a user manually declutter the view
+  // by hiding specific node(s) -- one at a time via the inspector's "Hide
+  // this node" button (wired in the node tap handler below), or several at
+  // once via the "Hide selected" topbar button acting on whatever's
+  // currently Cytoscape-selected (click, or shift/ctrl/cmd-drag a box --
+  // both are Cytoscape's own default selection gestures, no extra wiring
+  // needed here). Hidden nodes come back individually (a "Show" button per
+  // row) or all at once via the Hidden Nodes sidebar panel.
+  //
+  // Uses the same display:none class-toggle mechanism as .ge-hidden/
+  // .node-hidden/.isolate-hidden (see buildCyStyle), but .user-hidden has no
+  // governing checkbox -- userHiddenNodeIds itself IS the source of truth
+  // for which nodes should carry the class, which matters below when
+  // reconciling against isolate-mode's temporary force-reveal (see
+  // focusFinding/applyPathQueryHighlight).
+  // -----------------------------------------------------------------------
+  const userHiddenNodeIds = new Set();
+  const hiddenNodesListEl = document.getElementById("hidden-nodes-list");
+  const hiddenNodesCountEl = document.getElementById("hidden-nodes-count");
+  const hiddenNodesShowAllBtn = document.getElementById("hidden-nodes-showall-btn");
+
+  function renderHiddenNodesList() {
+    if (userHiddenNodeIds.size === 0) {
+      hiddenNodesListEl.innerHTML = `<li class="hidden-nodes-empty">No nodes hidden.</li>`;
+      hiddenNodesCountEl.textContent = "No nodes hidden";
+      hiddenNodesShowAllBtn.disabled = true;
+      return;
+    }
+    const ids = Array.from(userHiddenNodeIds);
+    hiddenNodesListEl.innerHTML = ids
+      .map((id) => {
+        const node = cy.getElementById(id);
+        const type = node.empty() ? "" : node.data("type");
+        return `<li class="hidden-node-row" data-node-id="${escapeHtml(id)}">
+          <span class="hidden-node-name">${escapeHtml(nodeLabel(id))}<span class="hidden-node-type">${escapeHtml(type)}</span></span>
+          <button type="button" class="hidden-node-show-btn">Show</button>
+        </li>`;
+      })
+      .join("");
+    hiddenNodesCountEl.textContent = `${ids.length} node${ids.length === 1 ? "" : "s"} hidden`;
+    hiddenNodesShowAllBtn.disabled = false;
+  }
+
+  // Hides every node in nodeEles (a Cytoscape collection, possibly a single
+  // node wrapped via cy.getElementById or the full :selected set) -- records
+  // each id in userHiddenNodeIds (the panel's data source) before adding the
+  // display:none class, and unselects them since a just-hidden node has no
+  // business staying selected (leaving "Hide selected" pointed at elements
+  // that are no longer visible).
+  //
+  // Also clears the inspector if it's currently showing one of the nodes
+  // being hidden -- reached from both the inspector's own single-node "Hide
+  // this node" button AND the topbar's multi-node "Hide selected" button, so
+  // this check lives here rather than only at the single-node call site:
+  // without it, hiding the currently-inspected node via "Hide selected"
+  // would leave the inspector (and its now-stale "Hide this node" button)
+  // pointing at a node no longer on the canvas. inspectedNodeId/
+  // inspectorHideNodeBtn are declared further down, near the node tap
+  // handler, but closures resolve by call time, not declaration order, and
+  // hideNodes is never invoked before that declaration has run.
+  function hideNodes(nodeEles) {
+    if (nodeEles.empty()) return;
+    nodeEles.forEach((n) => userHiddenNodeIds.add(n.id()));
+    nodeEles.addClass("user-hidden");
+    nodeEles.unselect();
+    renderHiddenNodesList();
+    if (inspectedNodeId !== null && !nodeEles.filter((n) => n.id() === inspectedNodeId).empty()) {
+      inspectedNodeId = null;
+      inspectorHideNodeBtn.hidden = true;
+      clearInspector();
+    }
+  }
+
+  function showHiddenNode(id) {
+    userHiddenNodeIds.delete(id);
+    cy.getElementById(id).removeClass("user-hidden");
+    renderHiddenNodesList();
+  }
+
+  function showAllHiddenNodes() {
+    cy.nodes(".user-hidden").removeClass("user-hidden");
+    userHiddenNodeIds.clear();
+    renderHiddenNodesList();
+  }
+
+  hiddenNodesListEl.addEventListener("click", (evt) => {
+    const btn = evt.target.closest(".hidden-node-show-btn");
+    if (!btn) return;
+    const row = btn.closest(".hidden-node-row");
+    if (row) showHiddenNode(row.dataset.nodeId);
+  });
+
+  hiddenNodesShowAllBtn.addEventListener("click", showAllHiddenNodes);
+
+  renderHiddenNodesList();
+
+  // "Hide selected" topbar button: enabled only while at least one node is
+  // currently Cytoscape-selected, so it's never a pointless no-op click.
+  // Listens at the core level (no selector) since either a tap-select or a
+  // box-select can change the node selection, and either should re-evaluate
+  // the same way.
+  const hideSelectedBtn = document.getElementById("hide-selected-btn");
+  function updateHideSelectedBtnEnabled() {
+    hideSelectedBtn.disabled = cy.nodes(":selected").empty();
+  }
+  cy.on("select unselect", updateHideSelectedBtnEnabled);
+  hideSelectedBtn.addEventListener("click", () => {
+    hideNodes(cy.nodes(":selected"));
+    updateHideSelectedBtnEnabled();
+  });
+  updateHideSelectedBtnEnabled();
+
+  // -----------------------------------------------------------------------
   // Findings panel + transient "focus" highlight.
   //
   // The highlight is applied via Cytoscape style *bypasses* (ele.style()/
@@ -658,6 +784,11 @@ async function main() {
   // separately from focusedNodeEles since those get the --focus-highlight
   // border treatment below and these don't (they're just made visible).
   let focusedAwsDefaultNodeEles = cy.collection();
+  // User-hidden nodes (see userHiddenNodeIds above) force-revealed by
+  // focusFinding because they're part of the focused finding's evidence
+  // chain -- same tracking pattern as focusedAwsDefaultNodeEles, re-hidden
+  // by clearFocus() once focus clears.
+  let focusedUserHiddenNodeEles = cy.collection();
 
   // -----------------------------------------------------------------------
   // Isolate/focus-zoom: when a finding or path-query result is focused
@@ -767,10 +898,19 @@ async function main() {
     if (awsDefaultToggle && !awsDefaultToggle.checked) {
       focusedAwsDefaultNodeEles.addClass("node-hidden");
     }
+    // Same idea for user-hidden nodes force-revealed by focusFinding (see
+    // userHiddenNodeIds/hideNodes) -- unlike the two toggles above, there's
+    // no checkbox to consult here: userHiddenNodeIds itself is the live
+    // source of truth for which nodes should stay hidden, so filter against
+    // it directly rather than a frozen snapshot. This correctly leaves a
+    // node revealed if the user explicitly clicked "Show" on it (removing it
+    // from the set) while it happened to be force-revealed by this focus.
+    focusedUserHiddenNodeEles.filter((n) => userHiddenNodeIds.has(n.id())).addClass("user-hidden");
     focusedNodeEles.removeStyle();
     focusedEdgeEles = cy.collection();
     focusedNodeEles = cy.collection();
     focusedAwsDefaultNodeEles = cy.collection();
+    focusedUserHiddenNodeEles = cy.collection();
     // Isolate-mode cleanup: restore whatever isolate is currently active
     // (if any) to its exact pre-isolation view. Must run after the
     // ge-hidden/node-hidden reconciliation above, not instead of it --
@@ -817,6 +957,15 @@ async function main() {
     awsDefaultRevealNodes.removeClass("node-hidden");
     focusedAwsDefaultNodeEles = awsDefaultRevealNodes;
 
+    // Same idea for nodes the user manually hid (see userHiddenNodeIds/
+    // hideNodes) -- a finding shouldn't silently look incomplete just
+    // because one of its nodes happened to be hidden earlier. Re-hidden by
+    // clearFocus() above once focus clears (unless the user explicitly
+    // un-hid it in the meantime).
+    const userHiddenRevealNodes = touchedNodes.filter((n) => userHiddenNodeIds.has(n.id()));
+    userHiddenRevealNodes.removeClass("user-hidden");
+    focusedUserHiddenNodeEles = userHiddenRevealNodes;
+
     // Isolate mode: hide everything outside the finding's frame/evidence
     // chain and relayout just that subset to fill the canvas. Must run
     // after the ge-hidden/node-hidden force-reveals above (an element
@@ -841,6 +990,13 @@ async function main() {
 
     focusedEdgeEles = edgeEles;
     focusedNodeEles = frameEles;
+
+    // A finding is now what's inspected, not a node -- clear any stale
+    // "Hide this node" targeting/visibility left over from a prior node
+    // selection (see inspectedNodeId/inspectorHideNodeBtn near the node tap
+    // handler below).
+    inspectedNodeId = null;
+    inspectorHideNodeBtn.hidden = true;
 
     renderInspector("Finding", [
       ["technique_id", finding.technique_id],
@@ -1071,6 +1227,12 @@ async function main() {
     if (awsDefaultToggle && !awsDefaultToggle.checked) {
       pathQueryNodeEles.filter((n) => awsDefaultNodeIds.has(n.id())).addClass("node-hidden");
     }
+    // Same idea for user-hidden nodes force-revealed by
+    // applyPathQueryHighlight (see userHiddenNodeIds/hideNodes) -- no
+    // toggle to consult here, userHiddenNodeIds is the live source of truth,
+    // so a node the user explicitly showed again while this result was
+    // highlighted correctly stays visible (it's no longer in the set).
+    pathQueryNodeEles.filter((n) => userHiddenNodeIds.has(n.id())).addClass("user-hidden");
     pathQueryNodeEles.removeStyle();
     pathQueryEdgeEles = cy.collection();
     pathQueryNodeEles = cy.collection();
@@ -1140,6 +1302,12 @@ async function main() {
     // incident edges become visible automatically once both endpoints are
     // (see the .node-hidden stylesheet comment).
     nodeEles.removeClass("node-hidden");
+    // Same idea for nodes the user manually hid (see userHiddenNodeIds/
+    // hideNodes) -- a path can legitimately route through a node the user
+    // hid earlier for an unrelated reason. Re-hidden by
+    // clearPathQueryHighlight() above once the highlight clears (unless the
+    // user explicitly un-hid it in the meantime).
+    nodeEles.removeClass("user-hidden");
 
     // Isolate mode: hide everything outside the result subset and
     // relayout just that subset to fill the canvas (same pattern as
@@ -1276,6 +1444,24 @@ async function main() {
     }
   }
 
+  // Inspector's "Hide this node" button -- lives outside #inspector-content
+  // in index.html (a persistent sibling, not part of renderInspector's
+  // innerHTML) specifically so it survives loadFullDetail()'s later
+  // re-renders of that content (loading -> loaded/error), rather than
+  // needing to be re-threaded through every renderInspector() call's
+  // extraHtml. Shown/hidden and re-targeted (via inspectedNodeId) by the
+  // node/edge/background tap handlers below. Clearing the inspector once the
+  // node is actually hidden is handled inside hideNodes() itself (it checks
+  // inspectedNodeId there), not here, since "Hide selected" can just as
+  // easily hide the currently-inspected node and needs the exact same
+  // cleanup.
+  let inspectedNodeId = null;
+  const inspectorHideNodeBtn = document.getElementById("inspector-hide-node-btn");
+  inspectorHideNodeBtn.addEventListener("click", () => {
+    if (!inspectedNodeId) return;
+    hideNodes(cy.getElementById(inspectedNodeId));
+  });
+
   cy.on("tap", "node", (evt) => {
     hoverTooltip.hide();
     clearAllFocus();
@@ -1286,6 +1472,8 @@ async function main() {
       ["name", d.name],
       ["arn", d.arn],
     ];
+    inspectedNodeId = d.id;
+    inspectorHideNodeBtn.hidden = false;
     renderInspector("Node", basicFields, renderPropertiesLoading());
     loadFullDetail("Node", "/api/node", d.id, basicFields);
   });
@@ -1299,6 +1487,8 @@ async function main() {
       ["source", d.source],
       ["target", d.target],
     ];
+    inspectedNodeId = null;
+    inspectorHideNodeBtn.hidden = true;
     renderInspector("Edge", basicFields, renderPropertiesLoading());
     loadFullDetail("Edge", "/api/edge", d.id, basicFields);
   });
@@ -1307,6 +1497,8 @@ async function main() {
       hoverTooltip.hide();
       clearAllFocus();
       clearInspector();
+      inspectedNodeId = null;
+      inspectorHideNodeBtn.hidden = true;
     }
   });
 

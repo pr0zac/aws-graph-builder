@@ -167,7 +167,8 @@ body {
   cursor: pointer;
 }
 
-#layout-rerun-btn {
+#layout-rerun-btn,
+#hide-selected-btn {
   font-family: inherit;
   font-size: 0.85rem;
   color: var(--ink-primary);
@@ -178,8 +179,18 @@ body {
   cursor: pointer;
 }
 
-#layout-rerun-btn:hover {
+#layout-rerun-btn:hover,
+#hide-selected-btn:hover:not(:disabled) {
   background: var(--border-hairline);
+}
+
+/* "Hide selected" is disabled whenever nothing is currently selected on the
+   canvas (see app.js's updateHideSelectedBtnEnabled) -- dimmed the same way
+   the attack-path query panel's own buttons dim when inert (see
+   .pathquery-actions button:disabled). */
+#hide-selected-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Manual theme override control -- same visual weight as #layout-rerun-btn
@@ -629,8 +640,126 @@ body {
 }
 
 /* ---------------------------------------------------------------------
+   Hidden Nodes panel -- user-driven per-node hide/show (see app.js's
+   hideNodes/showHiddenNode/showAllHiddenNodes and userHiddenNodeIds).
+   Deliberately styled to echo the findings panel above (same summary-row +
+   scrollable-list shape) since it's the same kind of "here's a list of
+   things, act on one" UI, just for manually-hidden nodes instead of
+   detected findings.
+   --------------------------------------------------------------------- */
+#hidden-nodes-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  margin-bottom: 0.5rem;
+}
+
+#hidden-nodes-showall-btn {
+  font-family: inherit;
+  font-size: 0.78rem;
+  color: var(--ink-primary);
+  background: transparent;
+  border: 1px solid var(--border-ring);
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#hidden-nodes-showall-btn:hover:not(:disabled) {
+  background: var(--border-hairline);
+}
+
+#hidden-nodes-showall-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hidden-nodes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.hidden-node-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--border-hairline);
+  border-radius: 5px;
+}
+
+.hidden-node-name {
+  color: var(--ink-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hidden-node-type {
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  margin-left: 0.4rem;
+}
+
+.hidden-node-show-btn {
+  font-family: inherit;
+  font-size: 0.72rem;
+  color: var(--ink-primary);
+  background: transparent;
+  border: 1px solid var(--border-ring);
+  border-radius: 5px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.hidden-node-show-btn:hover {
+  background: var(--border-hairline);
+}
+
+.hidden-nodes-empty {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+/* ---------------------------------------------------------------------
    Inspector panel
    --------------------------------------------------------------------- */
+/* No explicit `display` here (a <button> is inline-block by default, which
+   is enough for margin-bottom below to work) -- deliberately, per the
+   #loading-overlay/#error-overlay comment above: an author `display` value
+   on this same selector would beat the UA stylesheet's `[hidden] { display:
+   none }` rule on specificity, leaving the button visible even while its
+   `hidden` attribute is set (app.js toggles `inspectorHideNodeBtn.hidden`
+   directly, not a class). */
+#inspector-hide-node-btn {
+  font-family: inherit;
+  font-size: 0.78rem;
+  color: var(--ink-primary);
+  background: transparent;
+  border: 1px solid var(--border-ring);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  margin-bottom: 0.6rem;
+}
+
+#inspector-hide-node-btn:hover {
+  background: var(--border-hairline);
+}
+
 #inspector-content {
   max-height: 60vh;
   overflow-y: auto;

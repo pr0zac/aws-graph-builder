@@ -19,6 +19,7 @@
           <input type="checkbox" id="toggle-aws-default-input" />
           <span>Show AWS-default nodes</span>
         </label>
+        <button id="hide-selected-btn" type="button" disabled title="Select node(s) on the canvas (click, or shift/ctrl/cmd-drag a box) then click to hide them">Hide selected</button>
         <button id="layout-rerun-btn" type="button">Re-run layout</button>
         <button id="theme-toggle-btn" type="button" title="Cycle color theme: System / Light / Dark">
           Theme: <span id="theme-toggle-label">System</span>
@@ -109,8 +110,18 @@
           <div id="pathquery-status"></div>
         </section>
 
+        <section id="hidden-nodes-panel">
+          <h2>Hidden Nodes</h2>
+          <div id="hidden-nodes-summary">
+            <span id="hidden-nodes-count">No nodes hidden</span>
+            <button id="hidden-nodes-showall-btn" type="button" disabled>Show all</button>
+          </div>
+          <ul id="hidden-nodes-list" class="hidden-nodes-list"></ul>
+        </section>
+
         <section id="inspector-panel">
           <h2>Inspector</h2>
+          <button id="inspector-hide-node-btn" type="button" hidden>Hide this node</button>
           <div id="inspector-empty" class="inspector-empty">
             Click a node, edge, or finding to inspect it.
           </div>
