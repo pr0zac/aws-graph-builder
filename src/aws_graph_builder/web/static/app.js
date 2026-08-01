@@ -658,8 +658,6 @@ async function main() {
   // separately from focusedNodeEles since those get the --focus-highlight
   // border treatment below and these don't (they're just made visible).
   let focusedAwsDefaultNodeEles = cy.collection();
-  let pulseIntervalId = null;
-  let pulseOn = false;
 
   // -----------------------------------------------------------------------
   // Isolate/focus-zoom: when a finding or path-query result is focused
@@ -695,12 +693,10 @@ async function main() {
   // is just 2 nodes + 1-2 edges) that fits the tiny bounding box to the
   // WHOLE canvas, which for this graph's real data measured 17x+ zoom live
   // (a 2-node/2-edge finding, 1620x1025 viewport). At that zoom, node/label
-  // rendering is absurdly oversized, and the focus/path pulse's fixed
-  // graph-space width delta (see focusFinding/applyPathQueryHighlight) gets
-  // magnified into a jarring flash, since Cytoscape scales stroke width
-  // with zoom. 2x reads as "nicely framed" in practice: small enough that a
-  // 2-node finding doesn't fill the screen, high enough that it doesn't
-  // look zoomed OUT relative to the rest of the UI.
+  // rendering is absurdly oversized. 2x reads as "nicely framed" in
+  // practice: small enough that a 2-node finding doesn't fill the screen,
+  // high enough that it doesn't look zoomed OUT relative to the rest of
+  // the UI.
   const ISOLATE_ZOOM_CEILING = 2;
 
   // Hides everything except keepVisibleEles and relayouts just that
@@ -751,10 +747,6 @@ async function main() {
   }
 
   function clearFocus() {
-    if (pulseIntervalId !== null) {
-      clearInterval(pulseIntervalId);
-      pulseIntervalId = null;
-    }
     focusedEdgeEles.removeStyle();
     // Evidence edges can include EffectivePermission edges that are hidden
     // by default (see HIDDEN_BY_DEFAULT_EDGE_TYPES) -- focusFinding force-
@@ -849,13 +841,6 @@ async function main() {
 
     focusedEdgeEles = edgeEles;
     focusedNodeEles = frameEles;
-
-    pulseOn = false;
-    pulseIntervalId = setInterval(() => {
-      pulseOn = !pulseOn;
-      focusedEdgeEles.style({ width: pulseOn ? 6 : 4 });
-      focusedNodeEles.style({ "border-width": pulseOn ? 6 : 4 });
-    }, 450);
 
     renderInspector("Finding", [
       ["technique_id", finding.technique_id],
