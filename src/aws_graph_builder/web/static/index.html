@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>aws-graph-builder visualizer</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <h1>aws-graph-builder</h1>
+      <div id="topbar-controls">
+        <label id="toggle-effective-permission" class="toggle">
+          <input type="checkbox" id="toggle-effective-permission-input" />
+          <span>Show EffectivePermission edges</span>
+        </label>
+        <button id="layout-rerun-btn" type="button">Re-run layout</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <div id="cy"></div>
+
+      <div id="loading-overlay">
+        <div id="loading-spinner"></div>
+        <div id="loading-text">Loading graph…</div>
+      </div>
+
+      <div id="error-overlay" hidden>
+        <div id="error-text"></div>
+      </div>
+
+      <aside id="sidebar">
+        <section id="legend">
+          <h2>Legend</h2>
+
+          <h3>Node categories</h3>
+          <ul id="legend-nodes" class="legend-list"></ul>
+
+          <h3>Edge severity</h3>
+          <ul id="legend-edges" class="legend-list"></ul>
+        </section>
+
+        <section id="findings-panel">
+          <h2>Findings</h2>
+          <div id="findings-summary">
+            <span id="findings-count"></span>
+          </div>
+          <div id="findings-filter">
+            <label><input type="checkbox" class="severity-filter-cb" value="critical" checked /> Critical</label>
+            <label><input type="checkbox" class="severity-filter-cb" value="high" checked /> High</label>
+            <label><input type="checkbox" class="severity-filter-cb" value="medium" checked /> Medium</label>
+            <label><input type="checkbox" class="severity-filter-cb" value="low" checked /> Low</label>
+          </div>
+          <ul id="findings-list" class="findings-list"></ul>
+        </section>
+
+        <section id="pathquery-panel">
+          <h2>Attack Path Query</h2>
+
+          <div class="pathquery-field">
+            <label for="pathquery-source-input">Source node</label>
+            <div class="node-picker">
+              <input type="text" id="pathquery-source-input" placeholder="Search by name…" autocomplete="off" />
+              <ul id="pathquery-source-suggestions" class="node-picker-suggestions" hidden></ul>
+            </div>
+          </div>
+
+          <div class="pathquery-field">
+            <label>Target</label>
+            <div class="pathquery-radio-row">
+              <label><input type="radio" name="pathquery-target-mode" value="node" checked /> Specific node</label>
+              <label><input type="radio" name="pathquery-target-mode" value="high_value" /> Any high-value principal</label>
+            </div>
+            <div class="node-picker" id="pathquery-target-field">
+              <input type="text" id="pathquery-target-input" placeholder="Search by name…" autocomplete="off" />
+              <ul id="pathquery-target-suggestions" class="node-picker-suggestions" hidden></ul>
+            </div>
+          </div>
+
+          <div class="pathquery-field">
+            <label>Mode</label>
+            <div class="pathquery-radio-row">
+              <label id="pathquery-mode-reachability-label">
+                <input type="radio" id="pathquery-mode-reachability-input" name="pathquery-mode" value="reachability" checked /> General reachability
+              </label>
+              <label><input type="radio" id="pathquery-mode-attack-input" name="pathquery-mode" value="attack" /> Attack path</label>
+            </div>
+          </div>
+
+          <div class="pathquery-field pathquery-hops-field">
+            <label for="pathquery-maxhops-input">Max hops</label>
+            <input type="number" id="pathquery-maxhops-input" min="1" max="10" value="6" />
+          </div>
+
+          <div class="pathquery-actions">
+            <button id="pathquery-run-btn" type="button" disabled>Find paths</button>
+            <button id="pathquery-clear-btn" type="button">Clear</button>
+          </div>
+
+          <div id="pathquery-status"></div>
+        </section>
+
+        <section id="inspector-panel">
+          <h2>Inspector</h2>
+          <div id="inspector-empty" class="inspector-empty">
+            Click a node, edge, or finding to inspect it.
+          </div>
+          <div id="inspector-content" hidden></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script src="/cytoscape.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

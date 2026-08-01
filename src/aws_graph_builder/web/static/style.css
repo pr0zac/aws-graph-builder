@@ -1,0 +1,757 @@
+/* ---------------------------------------------------------------------
+   Theme tokens. Light values are the default; dark values apply under
+   prefers-color-scheme: dark. These custom properties are also read by
+   app.js (via getComputedStyle) for anything Cytoscape needs as a JS
+   color string (Cytoscape stylesheets can't reference CSS variables
+   directly), so keep these names in sync with app.js's THEME lookups.
+   --------------------------------------------------------------------- */
+:root {
+  --surface: #fcfcfb;
+  --ink-primary: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #898781;
+  --border-hairline: #e1e0d9;
+  --border-ring: rgba(11, 11, 11, 0.10);
+
+  /* Node category colors (light) */
+  --cat-principal: #2a78d6;
+  --cat-policy: #008300;
+  --cat-infra: #e87ba4;
+  --cat-org: #eda100;
+
+  /* Edge severity colors -- fixed, identical in light/dark */
+  --edge-critical: #d03b3b;
+  --edge-serious: #ec835a;
+  --edge-structural: #898781;
+
+  /* Finding severity colors (critical/high/medium/low -- a distinct scale
+     from the edge-severity tiers above) -- fixed, identical in light/dark,
+     same rationale: a severity's meaning shouldn't shift with theme. */
+  --sev-critical: #d03b3b;
+  --sev-high: #ec835a;
+  --sev-medium: #e0a627;
+  --sev-low: #7a8a99;
+
+  /* Transient "focus" highlight for a selected finding's nodes/evidence
+     edges -- deliberately distinct from every category/severity color
+     above so it reads as a temporary state layered on top, not a new
+     permanent category. Fixed, identical in light/dark. */
+  --focus-highlight: #00b7c3;
+
+  /* Transient highlight for an active attack-path/reachability query
+     result -- a second "currently focused" state alongside
+     --focus-highlight above. Deliberately a different hue (violet vs
+     cyan) so the two never look identical; findings-focus and path-query
+     highlight are mutually exclusive at any given time (see app.js
+     clearAllFocus()). Fixed, identical in light/dark. */
+  --path-highlight: #8b5cf6;
+
+  /* Persistent halo for nodes where high_value === true (/api/graph).
+     Applied via Cytoscape's overlay-* properties (a soft glow behind the
+     node) rather than border-color, so it coexists with node:selected,
+     --focus-highlight, and --path-highlight -- all of which style the
+     border -- without fighting over the same visual channel. Fixed,
+     identical in light/dark. */
+  --high-value-badge: #f2b705;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1a1a19;
+    --ink-primary: #ffffff;
+    --ink-secondary: #c3c2b7;
+    --ink-muted: #898781;
+    --border-hairline: #2c2c2a;
+    --border-ring: rgba(255, 255, 255, 0.10);
+
+    --cat-principal: #3987e5;
+    --cat-policy: #008300;
+    --cat-infra: #d55181;
+    --cat-org: #c98500;
+  }
+}
+
+/* Explicit override hooks for a future manual theme toggle (in addition
+   to the prefers-color-scheme media query above), keyed the same way the
+   Artifact runtime convention does it: a data-theme attribute on the
+   root element wins over the OS preference in either direction. */
+:root[data-theme="dark"] {
+  --surface: #1a1a19;
+  --ink-primary: #ffffff;
+  --ink-secondary: #c3c2b7;
+  --ink-muted: #898781;
+  --border-hairline: #2c2c2a;
+  --border-ring: rgba(255, 255, 255, 0.10);
+
+  --cat-principal: #3987e5;
+  --cat-policy: #008300;
+  --cat-infra: #d55181;
+  --cat-org: #c98500;
+}
+
+:root[data-theme="light"] {
+  --surface: #fcfcfb;
+  --ink-primary: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #898781;
+  --border-hairline: #e1e0d9;
+  --border-ring: rgba(11, 11, 11, 0.10);
+
+  --cat-principal: #2a78d6;
+  --cat-policy: #008300;
+  --cat-infra: #e87ba4;
+  --cat-org: #eda100;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--surface);
+  color: var(--ink-primary);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------------
+   Top bar
+   --------------------------------------------------------------------- */
+#topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border-hairline);
+  flex-shrink: 0;
+}
+
+#topbar h1 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--ink-primary);
+}
+
+#topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle input {
+  cursor: pointer;
+}
+
+#layout-rerun-btn {
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-primary);
+  background: transparent;
+  border: 1px solid var(--border-ring);
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+
+#layout-rerun-btn:hover {
+  background: var(--border-hairline);
+}
+
+/* ---------------------------------------------------------------------
+   Main layout: graph canvas + sidebar
+   --------------------------------------------------------------------- */
+#main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+}
+
+#cy {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  background: var(--surface);
+}
+
+#sidebar {
+  width: 320px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border-hairline);
+  overflow-y: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+#sidebar h2 {
+  font-size: 0.95rem;
+  margin: 0 0 0.5rem 0;
+  color: var(--ink-primary);
+}
+
+#sidebar h3 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0.75rem 0 0.35rem 0;
+  color: var(--ink-muted);
+}
+
+/* ---------------------------------------------------------------------
+   Legend
+   --------------------------------------------------------------------- */
+.legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.legend-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--ink-secondary);
+}
+
+.legend-swatch {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+}
+
+.legend-swatch.shape-ellipse {
+  border-radius: 50%;
+}
+
+.legend-swatch.shape-round-rectangle {
+  border-radius: 4px;
+}
+
+.legend-swatch.shape-rectangle {
+  border-radius: 0;
+}
+
+.legend-swatch.shape-hexagon,
+.legend-swatch.shape-triangle,
+.legend-swatch.shape-diamond,
+.legend-swatch.shape-star {
+  /* Simple approximations good enough for a legend key; exact node
+     shapes are rendered by Cytoscape itself on the canvas. */
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+}
+
+.legend-swatch.shape-triangle {
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+}
+
+.legend-swatch.shape-diamond {
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+
+.legend-swatch.shape-star {
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+
+.legend-line {
+  flex-shrink: 0;
+  width: 22px;
+  height: 0;
+  border-top-style: solid;
+  display: inline-block;
+}
+
+/* Legend swatch/line colors, keyed to the same tokens app.js reads via
+   getComputedStyle for the actual Cytoscape node/edge styles. */
+.cat-principal {
+  background: var(--cat-principal);
+}
+
+.cat-policy {
+  background: var(--cat-policy);
+}
+
+.cat-infra {
+  background: var(--cat-infra);
+}
+
+.cat-org {
+  background: var(--cat-org);
+}
+
+/* High-value badge legend swatch -- a ring (box-shadow), not a fill, to
+   read as the same halo-behind-the-node treatment app.js applies via
+   Cytoscape overlay-* properties, rather than implying it's a 5th node
+   category color. */
+.legend-highvalue {
+  background: transparent;
+  box-shadow: 0 0 0 3px var(--high-value-badge);
+}
+
+.edge-critical {
+  border-top-color: var(--edge-critical);
+  border-top-width: 3px;
+}
+
+.edge-serious {
+  border-top-color: var(--edge-serious);
+  border-top-width: 2px;
+}
+
+.edge-structural {
+  border-top-color: var(--edge-structural);
+  border-top-width: 1px;
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------------
+   Findings panel
+   --------------------------------------------------------------------- */
+#findings-summary {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  margin-bottom: 0.5rem;
+}
+
+#findings-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--ink-secondary);
+  margin-bottom: 0.6rem;
+}
+
+#findings-filter label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+#findings-filter input {
+  cursor: pointer;
+}
+
+.findings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.finding-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.4rem;
+  font-size: 0.76rem;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--border-hairline);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.finding-row:hover {
+  background: var(--border-hairline);
+}
+
+.finding-technique {
+  color: var(--ink-primary);
+  font-weight: 600;
+}
+
+.finding-path {
+  flex-basis: 100%;
+  color: var(--ink-secondary);
+  word-break: break-word;
+}
+
+.sev-badge {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #fff;
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+}
+
+.sev-badge.sev-critical {
+  background: var(--sev-critical);
+}
+
+.sev-badge.sev-high {
+  background: var(--sev-high);
+}
+
+.sev-badge.sev-medium {
+  background: var(--sev-medium);
+}
+
+.sev-badge.sev-low {
+  background: var(--sev-low);
+}
+
+/* ---------------------------------------------------------------------
+   Attack-path query panel
+   --------------------------------------------------------------------- */
+.pathquery-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.78rem;
+}
+
+.pathquery-field > label:first-child {
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pathquery-radio-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--ink-secondary);
+}
+
+.pathquery-radio-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Disabled state for the target node-picker when "Any high-value
+   principal" is selected instead -- dims it to signal it's inert without
+   hiding it outright (keeps the layout stable). */
+.pathquery-field-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Mode radio dimmed when "Any high-value principal" target forces +
+   locks Attack path mode (the target=high_value sentinel only has
+   server-side meaning for /api/attack-paths -- see app.js). */
+.pathquery-radio-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pathquery-hops-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pathquery-hops-field label {
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+#pathquery-maxhops-input {
+  width: 4rem;
+}
+
+.node-picker {
+  position: relative;
+}
+
+.node-picker input[type="text"] {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-primary);
+  background: var(--surface);
+  border: 1px solid var(--border-ring);
+  border-radius: 5px;
+  padding: 0.3rem 0.5rem;
+}
+
+.node-picker input[type="text"]:disabled {
+  cursor: not-allowed;
+}
+
+.node-picker-suggestions {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-hairline);
+  border-radius: 5px;
+  box-shadow: 0 4px 12px var(--border-ring);
+}
+
+.node-picker-suggestion {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  color: var(--ink-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-picker-suggestion:hover,
+.node-picker-suggestion.node-picker-suggestion-active {
+  background: var(--border-hairline);
+}
+
+.node-picker-suggestion-type {
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  margin-left: 0.3rem;
+}
+
+.node-picker-empty {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+.pathquery-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.pathquery-actions button {
+  font-family: inherit;
+  font-size: 0.8rem;
+  color: var(--ink-primary);
+  background: transparent;
+  border: 1px solid var(--border-ring);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+
+.pathquery-actions button:hover:not(:disabled) {
+  background: var(--border-hairline);
+}
+
+.pathquery-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#pathquery-status {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  min-height: 1.1em;
+}
+
+#pathquery-status.pathquery-status-error {
+  color: var(--edge-critical);
+}
+
+#pathquery-status.pathquery-status-success {
+  color: var(--ink-secondary);
+}
+
+/* ---------------------------------------------------------------------
+   Inspector panel
+   --------------------------------------------------------------------- */
+#inspector-content {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.inspector-empty {
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+
+#inspector-content dl {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+#inspector-content dt {
+  color: var(--ink-muted);
+  margin-top: 0.6rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+#inspector-content dd {
+  margin: 0.15rem 0 0 0;
+  color: var(--ink-primary);
+  word-break: break-all;
+}
+
+#inspector-content h3 {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-muted);
+  margin: 0.85rem 0 0.35rem 0;
+}
+
+.inspector-value-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  word-break: break-all;
+}
+
+.inspector-properties-status {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+.inspector-properties-error {
+  color: var(--edge-critical);
+}
+
+/* Full node/edge `properties` blob -- can be a large nested policy
+   document or raw API response fragment, so this wraps long strings
+   instead of letting them overflow the 320px sidebar horizontally, with
+   overflow-x as a belt-and-braces fallback for anything word-break can't
+   break on. Vertical growth is bounded by #inspector-content's own scroll
+   above, so a big blob doesn't blow out the page layout. */
+.inspector-properties {
+  margin: 0.35rem 0 0 0;
+  padding: 0.5rem;
+  background: var(--border-hairline);
+  border-radius: 4px;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+#inspector-kind-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-muted);
+  border: 1px solid var(--border-ring);
+  border-radius: 4px;
+  padding: 0.1rem 0.4rem;
+}
+
+/* ---------------------------------------------------------------------
+   Loading / error overlays
+   --------------------------------------------------------------------- */
+#loading-overlay,
+#error-overlay {
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  background: var(--surface);
+  z-index: 10;
+}
+
+/* `display: flex` must only apply while NOT [hidden] -- author styles
+   otherwise beat the UA stylesheet's `[hidden] { display: none }` rule,
+   which would leave the overlay visually covering the whole graph +
+   sidebar even after JS sets the `hidden` property to true. */
+#loading-overlay:not([hidden]),
+#error-overlay:not([hidden]) {
+  display: flex;
+}
+
+#loading-text,
+#error-text {
+  font-size: 0.85rem;
+  color: var(--ink-secondary);
+}
+
+#error-text {
+  color: var(--edge-critical);
+  max-width: 30rem;
+  text-align: center;
+  padding: 0 1rem;
+}
+
+#loading-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--border-hairline);
+  border-top-color: var(--cat-principal);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Cytoscape hover tooltip (edge/node type on hover, per spec -- edge
+   labels are never permanently rendered on-canvas at this density)
+   --------------------------------------------------------------------- */
+#hover-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface);
+  color: var(--ink-primary);
+  border: 1px solid var(--border-ring);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  box-shadow: 0 2px 8px var(--border-ring);
+  z-index: 20;
+  display: none;
+  white-space: nowrap;
+}
