@@ -689,6 +689,20 @@ async function main() {
     isolateSnapshot = { positions, pan: { ...cy.pan() }, zoom: cy.zoom() };
   }
 
+  // Ceiling on the zoom level an isolate's fit-to-selection can settle at.
+  // runLayout()'s cose layout uses fit:true with a fixed 30px padding
+  // (coseLayoutOptions above) -- for a small selection (a typical finding
+  // is just 2 nodes + 1-2 edges) that fits the tiny bounding box to the
+  // WHOLE canvas, which for this graph's real data measured 17x+ zoom live
+  // (a 2-node/2-edge finding, 1620x1025 viewport). At that zoom, node/label
+  // rendering is absurdly oversized, and the focus/path pulse's fixed
+  // graph-space width delta (see focusFinding/applyPathQueryHighlight) gets
+  // magnified into a jarring flash, since Cytoscape scales stroke width
+  // with zoom. 2x reads as "nicely framed" in practice: small enough that a
+  // 2-node finding doesn't fill the screen, high enough that it doesn't
+  // look zoomed OUT relative to the rest of the UI.
+  const ISOLATE_ZOOM_CEILING = 2;
+
   // Hides everything except keepVisibleEles and relayouts just that
   // visible subset (reusing runLayout(), which is already scoped to
   // non-.isolate-hidden elements) so it fills the canvas. Callers must
@@ -696,10 +710,26 @@ async function main() {
   // keepVisibleEles that those toggles would otherwise hide BEFORE calling
   // this, and should apply their own highlight styling AFTER, so it isn't
   // wiped/reordered by the relayout.
+  //
+  // Clamps the resulting zoom down to ISOLATE_ZOOM_CEILING when the fit
+  // overshoots it (small selections), but never clamps UP -- a larger
+  // isolated result (e.g. a multi-hop attack-path query touching 5-10
+  // nodes) that naturally fits at or below the ceiling is left exactly as
+  // runLayout()'s fit produced it, so it still gets a full, well-framed
+  // view instead of being forced out to a smaller one. Re-centers on the
+  // current viewport middle (matching where the fit already centered the
+  // selection) rather than using the bare zoom setter, which would zoom
+  // around the viewport's top-left origin instead.
   function applyIsolate(keepVisibleEles) {
     snapshotViewIfNeeded();
     cy.elements().difference(keepVisibleEles).addClass("isolate-hidden");
     runLayout();
+    if (cy.zoom() > ISOLATE_ZOOM_CEILING) {
+      cy.zoom({
+        level: ISOLATE_ZOOM_CEILING,
+        renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
+      });
+    }
   }
 
   // Removes isolate-hidden from every element (not just keepVisibleEles --
