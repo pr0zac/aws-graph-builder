@@ -14,6 +14,7 @@ import typer
 import uvicorn
 
 from aws_graph_builder.cli._common import stderr_console, stdout_console
+from aws_graph_builder.report import report_path_for
 from aws_graph_builder.web.server import create_app
 
 
@@ -41,7 +42,15 @@ def serve(
         raise typer.Exit(code=1)
 
     document = json.loads(input.read_text())
-    app = create_app(document)
+    report = None
+    report_path = report_path_for(input)
+    try:
+        candidate = json.loads(report_path.read_text())
+        if isinstance(candidate, dict) and isinstance(candidate.get("gaps"), list):
+            report = candidate
+    except (OSError, ValueError):
+        pass  # Missing or malformed coverage never prevents graph exploration.
+    app = create_app(document, report=report)
 
     url = f"http://{host}:{port}/"
     stdout_console.print(

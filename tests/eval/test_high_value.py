@@ -88,3 +88,29 @@ def test_multiple_high_value_principals_all_returned() -> None:
     _make_effective_permission_edge(graph, IAM_ADMIN_ARN, BUCKET_ARN, actions=["iam:*"], resource_pattern="*")
 
     assert find_high_value_principals(graph) == {ADMIN_ARN, IAM_ADMIN_ARN}
+
+
+def test_repeated_grants_do_not_repeat_pattern_matching_and_cache_is_per_graph(monkeypatch) -> None:
+    """Materialized grants repeat the same action set for every target.
+
+    Instrument the real matcher to enforce a work bound without a flaky timing
+    threshold. A graph mutation must still be seen by the next invocation.
+    """
+    from aws_graph_builder.eval import high_value
+
+    real_match = high_value.action_matches
+    calls = []
+
+    def measured(pattern, action):
+        calls.append((pattern, action))
+        return real_match(pattern, action)
+
+    monkeypatch.setattr(high_value, "action_matches", measured)
+    graph = new_graph()
+    add_node(graph, Node(id=S3_ONLY_ARN, type=NodeType.IAM_USER, name="s3-only", arn=S3_ONLY_ARN))
+    for index in range(20):
+        _make_effective_permission_edge(graph, S3_ONLY_ARN, f"bucket-{index}", actions=["s3:*"], resource_pattern="*")
+    assert find_high_value_principals(graph) == set()
+    assert len(calls) <= 4
+    _make_effective_permission_edge(graph, S3_ONLY_ARN, "bucket-0", actions=["*"], resource_pattern="*")
+    assert find_high_value_principals(graph) == {S3_ONLY_ARN}

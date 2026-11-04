@@ -74,7 +74,18 @@ Launches a local, offline web visualizer over a previously-written `graph.json` 
 uv run aws-graph-builder serve --input graph.json
 ```
 
-This starts a local web server and opens the visualizer in your default browser. It renders the full graph interactively — pan/zoom, nodes colored/shaped by type, edges styled by attack-path severity (critical `PrivescPath`, serious `CanAssume`, structural everything else — `EffectivePermission` is hidden by default since it can run into the thousands on a real scan) — alongside a legend, a findings panel (filterable by severity, click a finding to pan/zoom to it and highlight its evidence edges), and a node/edge inspector (click anything for full detail, including raw policy documents). The server also exposes a JSON API for programmatic queries against the loaded graph: `GET /api/graph`, `/api/node`, `/api/edge`, `/api/findings`, general-reachability `/api/paths?source=&target=&max_hops=`, and `/api/attack-paths` — the same query restricted to just the edges that mean "traversing this gets you control of the target principal" (`CanAssume`/`PrivescPath`), including an `?target=high_value` sentinel that finds paths to any detected high-value principal (`/api/high-value-principals` lists them — an `IamUser`/`IamRole` with an unrestricted, `Resource: "*"` + `*`/`iam:*` grant, the AWS equivalent of BloodHound's Domain Admins).
+This starts a local, offline investigation workspace and opens it in your browser. All assets ship with the Python package; Node.js and internet access are not needed to view a graph.
+
+- **Explore:** search principals by name, type, or ARN, open a neighborhood, and explicitly expand connections. Large expansions offer a selectable preview capped at 50 new nodes per action. An account overview remains available.
+- **Findings:** search and group detected techniques; filter by severity, technique, source/target, either endpoint, and whether the source already has high-value access. Open a finding to inspect its supporting relationships.
+- **Paths:** select endpoints or ask for routes to any high-value principal. Attack paths traverse only `CanAssume` and `PrivescPath`; general reachability is a separate mode. Select an individual route, inspect each hop's alternative techniques, or explicitly combine returned routes.
+- **Inspector:** node/relationship selection preserves the current graph. Details include required permissions, policy references and statements where available, unresolved conditions, and a secondary raw JSON view. Use **Back** to restore the prior graph, including its positions and viewport.
+
+The header shows account/scan context and coverage from a companion report such as `graph.report.json`. Missing or unreadable reports display **coverage unknown**. Effective permissions and AWS-default plumbing are hidden during exploration unless enabled; focused evidence temporarily reveals required items. Hide/restore, graph filters, Fit/Re-layout/Reset, resizable inspection, and System/Light/Dark themes are available. Press `/` for global search.
+
+The new `GET /api/viewer` endpoint supplies compact metadata and render data. `GET /api/routes?source=&target=&mode=attack&max_hops=6` returns unique node routes, shortest first, retaining parallel edge IDs as alternatives per hop. Queries cap hops at 10 and results at 200, with additional budgets of 25,000 examined transitions and 0.5 seconds of traversal. Responses distinguish complete, truncated, interrupted, and already-at-target results. Counts represent unique node sequences, not technique permutations. Static policy analysis and unresolved conditions still require review; a detected route is not a live exploit verification.
+
+Existing read-only endpoints remain compatible: `/api/graph`, `/api/node`, `/api/edge`, `/api/findings`, `/api/paths`, `/api/attack-paths`, and `/api/high-value-principals`. The legacy path endpoints retain their existing multigraph enumeration behavior; new clients should use `/api/routes` for bounded, unique-route queries.
 
 Useful flags:
 
@@ -98,3 +109,20 @@ uv run mypy src        # type check
 ```
 
 See `CLAUDE.md` for architecture orientation and `aws-graph-builder.md` for the full design doc, and `tasks.md` for implementation status.
+
+### Viewer development checks
+
+Pure frontend logic uses Node's built-in test runner (development only):
+
+```bash
+node --test tests/web/frontend/*.test.mjs
+```
+
+Browser tests are opt-in and use fictional account fixtures:
+
+```bash
+uv run playwright install chromium
+uv run pytest tests/web/test_viewer_browser.py --run-browser
+```
+
+Use `--browser-executable=/path/to/chromium` for an existing compatible browser, `--viewer-screenshots=/tmp/viewer-qa` to save screenshots, or `--live-graph=/path/to/graph.json` to include the optional local-artifact smoke test. Live account data is never included in committed fixtures. Ordinary `uv run pytest` skips browser tests. Validate distribution assets with `uv build`.

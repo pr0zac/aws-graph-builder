@@ -69,6 +69,9 @@ def find_high_value_principals(graph: nx.MultiDiGraph) -> set[str]:
     edges, mirroring `PermissionQuery`'s read-only role in `simulator.py`.
     """
     high_value_ids: set[str] = set()
+    # Materialization repeats the same action set across many target edges.
+    # Cache only within this invocation so subsequent graph mutations are seen.
+    access_by_actions: dict[tuple[str, ...], bool] = {}
     for node_id, node_data in graph.nodes(data=True):
         if node_data.get("type") not in _CANDIDATE_PRINCIPAL_TYPES:
             continue
@@ -78,7 +81,10 @@ def find_high_value_principals(graph: nx.MultiDiGraph) -> set[str]:
             properties = edge_data.get("properties", {})
             if properties.get("resource_pattern") != "*":
                 continue
-            if _grants_high_value_access(properties.get("actions", [])):
+            actions = tuple(properties.get("actions", []))
+            if actions not in access_by_actions:
+                access_by_actions[actions] = _grants_high_value_access(list(actions))
+            if access_by_actions[actions]:
                 high_value_ids.add(node_id)
                 break
     return high_value_ids

@@ -3,135 +3,76 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>aws-graph-builder visualizer</title>
+  <meta name="color-scheme" content="light dark" />
+  <title>AWS Graph · Identity explorer</title>
+  <link rel="icon" href="data:," />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div id="app">
-    <header id="topbar">
-      <h1>aws-graph-builder</h1>
-      <div id="topbar-controls">
-        <label id="toggle-effective-permission" class="toggle">
-          <input type="checkbox" id="toggle-effective-permission-input" />
-          <span>Show EffectivePermission edges</span>
-        </label>
-        <label id="toggle-aws-default" class="toggle">
-          <input type="checkbox" id="toggle-aws-default-input" />
-          <span>Show AWS-default nodes</span>
-        </label>
-        <button id="hide-selected-btn" type="button" disabled title="Select node(s) on the canvas (click, or shift/ctrl/cmd-drag a box) then click to hide them">Hide selected</button>
-        <button id="layout-rerun-btn" type="button">Re-run layout</button>
-        <button id="theme-toggle-btn" type="button" title="Cycle color theme: System / Light / Dark">
-          Theme: <span id="theme-toggle-label">System</span>
-        </button>
+  <header class="topbar">
+    <button id="nav-toggle" class="icon-button mobile-only" aria-label="Toggle navigation">☰</button>
+    <a class="brand" href="/" aria-label="AWS Graph home"><span class="brand-mark">◈</span><span>AWS <strong>GRAPH</strong><small>IDENTITY EXPLORER</small></span></a>
+    <div class="account"><span class="eyebrow">ACCOUNT</span><span id="account-id">Loading…</span><span id="coverage-pill" class="badge">Coverage unknown</span></div>
+    <div class="global-search"><label class="sr-only" for="global-search">Search all identities and resources</label><span aria-hidden="true">⌕</span><input id="global-search" type="search" placeholder="Search identities, resources, ARNs…" autocomplete="off" /><kbd>/</kbd><div id="global-results" class="search-popup" hidden><select id="global-options" size="6" aria-label="Search results"></select><button id="global-open" class="button primary">Open selected</button></div></div>
+    <button id="theme" class="icon-button" title="Change color theme">◐ <span id="theme-name">System</span></button>
+  </header>
+
+  <main class="workspace">
+    <aside id="navigation" class="navigation" aria-label="Investigation navigation">
+      <div class="nav-heading"><span class="eyebrow">WORKSPACE</span><span class="badge subtle">OFFLINE</span></div>
+      <nav class="tabs" aria-label="Workspaces"><button data-tab="explore" class="active" aria-current="page">Explore</button><button data-tab="findings">Findings <span id="findings-total"></span></button><button data-tab="paths">Paths</button></nav>
+
+      <section id="explore-panel" class="nav-panel">
+        <div class="section-heading"><h1>Explore access</h1><p>Start with an identity. Follow what it can control.</p></div>
+        <label class="field-label" for="explore-search">FIND A PRINCIPAL</label><input id="explore-search" class="input" type="search" placeholder="Name, role, or ARN" />
+        <label class="field-label" for="explore-type">Identity type</label><select id="explore-type" class="input"><option value="">Users &amp; roles</option><option value="IamUser">IAM users</option><option value="IamRole">IAM roles</option></select>
+        <div class="list-heading"><h2>High-value access</h2><span class="gold-dot"></span></div><div id="high-value-list" class="entity-list"></div>
+        <div class="list-heading"><h2>Principals</h2><span id="principal-count" class="muted"></span></div><div id="principal-list" class="entity-list"></div>
+        <button id="overview" class="button wide secondary">View account overview ↗</button>
+      </section>
+
+      <section id="findings-panel" class="nav-panel" hidden>
+        <div class="section-heading"><h1>Review findings</h1><p>Detected techniques, with the evidence behind each one.</p></div>
+        <label class="sr-only" for="finding-search">Search findings</label><input id="finding-search" class="input" type="search" placeholder="Search findings…" />
+        <div class="field-grid"><label>Severity<select id="finding-severity" class="input"><option value="">All severities</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select></label><label>Group by<select id="finding-group" class="input"><option value="source">Source</option><option value="technique">Technique</option></select></label></div>
+        <label class="field-label" for="finding-technique">Technique</label><select id="finding-technique" class="input"></select>
+        <details class="filter-details"><summary>Identity filters</summary><label>Related to either endpoint<select id="finding-related" class="input"></select></label><label>Source<select id="finding-source" class="input"></select></label><label>Target<select id="finding-target" class="input"></select></label><label>Source access<select id="finding-access" class="input"><option value="">All source principals</option><option value="ordinary">Not already high-value</option><option value="high_value">Already high-value</option></select></label></details>
+        <p id="finding-count" class="small muted" aria-live="polite"></p><div id="finding-list" class="finding-list"></div>
+      </section>
+
+      <section id="paths-panel" class="nav-panel" hidden>
+        <div class="section-heading"><h1>Follow a path</h1><p>Trace the steps from an identity to valuable access.</p></div>
+        <form id="route-form">
+          <label class="field-label" for="route-source-search">FROM</label><input id="route-source-search" class="input" type="search" placeholder="Filter source identities…" aria-label="Filter source nodes" /><select id="route-source" class="input" aria-label="Source node" required></select>
+          <div class="route-connector">↓</div>
+          <label class="field-label" for="route-target-search">TO</label><input id="route-target-search" class="input" type="search" placeholder="Filter target nodes…" aria-label="Filter target nodes" /><select id="route-target" class="input" aria-label="Target node"></select>
+          <div class="field-grid"><label>Query mode<select id="route-mode" class="input"><option value="attack">Attack paths</option><option value="reachability">General reachability</option></select></label><label>Max hops<input id="route-hops" class="input" type="number" min="1" max="10" value="6" /></label></div>
+          <p id="route-explanation" class="small muted">Uses assume-role and privilege-escalation relationships.</p><button id="route-run" class="button primary wide" type="submit">Find paths →</button>
+        </form>
+        <p id="route-status" class="small" role="status" aria-live="polite"></p><div id="route-list" class="route-list"></div><button id="route-union" class="button wide" hidden>Show all returned paths</button>
+      </section>
+      <footer class="nav-footer"><span class="status-dot"></span> Local analysis · Read-only<span id="scan-date"></span></footer>
+    </aside>
+
+    <section class="graph-workspace" aria-label="Graph exploration">
+      <div class="graph-toolbar"><div class="view-context"><button id="back" class="icon-button" disabled aria-label="Back to previous graph">←</button><div><span id="view-kind" class="eyebrow">EXPLORE</span><h2 id="view-title">Start an investigation</h2></div></div><div class="toolbar-actions"><button id="fit" class="button compact">Fit</button><button id="relayout" class="button compact">Re-layout</button><button id="reset" class="button compact">Reset</button><button id="hide-selected" class="button compact" disabled>Hide selected</button><button id="filter-toggle" class="button compact" aria-expanded="false" aria-controls="graph-filters">Filters</button></div></div>
+      <div id="graph-filters" class="graph-filters" hidden><label>Direction<select id="filter-direction" class="input"><option value="both">Both directions</option><option value="out">Outgoing</option><option value="in">Incoming</option></select></label><label>Relationships<select id="filter-relationship" class="input"><option value="all">All relationships</option><option value="attack">Attack relationships</option></select></label><label>Node type<select id="filter-type" class="input"></select></label><label class="check"><input id="filter-permissions" type="checkbox" />Effective permissions</label><label class="check"><input id="filter-aws" type="checkbox" />AWS-default resources</label></div>
+      <div class="canvas-area"><div id="cy" role="img" aria-label="Interactive access graph. Use node lists and the inspector for keyboard navigation."></div>
+        <div id="landing" class="landing"><div class="landing-art" aria-hidden="true"><i></i><i></i><i></i><i></i><span>◈</span></div><span class="eyebrow">UNDERSTAND YOUR AWS ACCESS</span><h2>Every identity has a story.<br />Follow the connections.</h2><p>Choose a principal to explore its access, examine a finding,<br class="desktop-only" /> or trace a path to high-value permissions.</p><div id="landing-stats" class="landing-stats"></div><div class="landing-actions"><button id="landing-findings" class="button">Review findings</button><button id="landing-overview" class="button secondary">Open account graph ↗</button></div></div>
+        <div id="graph-empty" class="canvas-message" hidden>No visible nodes. Restore hidden items or adjust your filters.</div>
+        <div id="loading" class="canvas-message"><span class="spinner"></span>Loading your graph…</div>
+        <div id="app-error" class="canvas-message error" role="alert" hidden></div>
+        <div id="focus-note" class="focus-note" hidden>Focused evidence view · required hidden items are temporarily revealed</div>
+        <details class="legend"><summary>Graph legend</summary><div><span class="legend-dot identity"></span>Identity <span class="legend-dot policy"></span>Policy <span class="legend-dot resource"></span>Resource</div><div><span class="gold-dot"></span>High-value access</div><div><span class="legend-line attack"></span>Privilege escalation</div><div><span class="legend-line assume"></span>Can assume role</div><div><span class="legend-line uncertain"></span>Unresolved condition</div></details>
       </div>
-    </header>
+      <div class="graph-status"><span id="visible-count">Ready to explore</span><span id="hidden-controls"></span><span class="muted">Scroll to zoom · Drag to pan · Shift-click to select</span></div>
+    </section>
 
-    <main id="main">
-      <div id="cy"></div>
+    <aside id="inspector" class="inspector" aria-label="Selection inspector" hidden><div id="inspector-resize" class="resize-handle" role="separator" aria-label="Resize inspector" aria-orientation="vertical" tabindex="0"></div><div class="inspector-top"><span class="eyebrow">INSPECTOR</span><button id="inspector-close" class="icon-button" aria-label="Close inspector">×</button></div><div id="inspector-content"></div></aside>
+  </main>
 
-      <div id="loading-overlay">
-        <div id="loading-spinner"></div>
-        <div id="loading-text">Loading graph…</div>
-      </div>
-
-      <div id="error-overlay" hidden>
-        <div id="error-text"></div>
-      </div>
-
-      <aside id="sidebar">
-        <section id="legend">
-          <h2>Legend</h2>
-
-          <h3>Node categories</h3>
-          <ul id="legend-nodes" class="legend-list"></ul>
-
-          <h3>Edge severity</h3>
-          <ul id="legend-edges" class="legend-list"></ul>
-        </section>
-
-        <section id="findings-panel">
-          <h2>Findings</h2>
-          <div id="findings-summary">
-            <span id="findings-count"></span>
-          </div>
-          <div id="findings-filter">
-            <label><input type="checkbox" class="severity-filter-cb" value="critical" checked /> Critical</label>
-            <label><input type="checkbox" class="severity-filter-cb" value="high" checked /> High</label>
-            <label><input type="checkbox" class="severity-filter-cb" value="medium" checked /> Medium</label>
-            <label><input type="checkbox" class="severity-filter-cb" value="low" checked /> Low</label>
-          </div>
-          <ul id="findings-list" class="findings-list"></ul>
-        </section>
-
-        <section id="pathquery-panel">
-          <h2>Attack Path Query</h2>
-
-          <div class="pathquery-field">
-            <label for="pathquery-source-input">Source node</label>
-            <div class="node-picker">
-              <input type="text" id="pathquery-source-input" placeholder="Search by name…" autocomplete="off" />
-              <ul id="pathquery-source-suggestions" class="node-picker-suggestions" hidden></ul>
-            </div>
-          </div>
-
-          <div class="pathquery-field">
-            <label>Target</label>
-            <div class="pathquery-radio-row">
-              <label><input type="radio" name="pathquery-target-mode" value="node" checked /> Specific node</label>
-              <label><input type="radio" name="pathquery-target-mode" value="high_value" /> Any high-value principal</label>
-            </div>
-            <div class="node-picker" id="pathquery-target-field">
-              <input type="text" id="pathquery-target-input" placeholder="Search by name…" autocomplete="off" />
-              <ul id="pathquery-target-suggestions" class="node-picker-suggestions" hidden></ul>
-            </div>
-          </div>
-
-          <div class="pathquery-field">
-            <label>Mode</label>
-            <div class="pathquery-radio-row">
-              <label id="pathquery-mode-reachability-label">
-                <input type="radio" id="pathquery-mode-reachability-input" name="pathquery-mode" value="reachability" checked /> General reachability
-              </label>
-              <label><input type="radio" id="pathquery-mode-attack-input" name="pathquery-mode" value="attack" /> Attack path</label>
-            </div>
-          </div>
-
-          <div class="pathquery-field pathquery-hops-field">
-            <label for="pathquery-maxhops-input">Max hops</label>
-            <input type="number" id="pathquery-maxhops-input" min="1" max="10" value="6" />
-          </div>
-
-          <div class="pathquery-actions">
-            <button id="pathquery-run-btn" type="button" disabled>Find paths</button>
-            <button id="pathquery-clear-btn" type="button">Clear</button>
-          </div>
-
-          <div id="pathquery-status"></div>
-        </section>
-
-        <section id="hidden-nodes-panel">
-          <h2>Hidden Nodes</h2>
-          <div id="hidden-nodes-summary">
-            <span id="hidden-nodes-count">No nodes hidden</span>
-            <button id="hidden-nodes-showall-btn" type="button" disabled>Show all</button>
-          </div>
-          <ul id="hidden-nodes-list" class="hidden-nodes-list"></ul>
-        </section>
-
-        <section id="inspector-panel">
-          <h2>Inspector</h2>
-          <button id="inspector-hide-node-btn" type="button" hidden>Hide this node</button>
-          <div id="inspector-empty" class="inspector-empty">
-            Click a node, edge, or finding to inspect it.
-          </div>
-          <div id="inspector-content" hidden></div>
-        </section>
-      </aside>
-    </main>
-  </div>
-
+  <dialog id="expansion-dialog"><div class="dialog-heading"><div><span class="eyebrow">EXPAND NEIGHBORHOOD</span><h2 id="expansion-title">Choose connections</h2></div><button id="expansion-close" class="icon-button" aria-label="Close expansion preview">×</button></div><p id="expansion-summary" class="muted"></p><input id="expansion-search" class="input" type="search" placeholder="Filter neighboring nodes…" aria-label="Filter expansion nodes" /><div id="expansion-list" class="expansion-list"></div><div class="dialog-footer"><span id="expansion-count" class="small"></span><button id="expansion-apply" class="button primary">Add selected connections</button></div></dialog>
   <script src="/cytoscape.min.js"></script>
-  <script src="/app.js"></script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -21,6 +21,7 @@ from aws_graph_builder.eval.high_value import find_high_value_principals
 from aws_graph_builder.graph.export import document_to_graph
 from aws_graph_builder.graph.schema import EdgeType
 from aws_graph_builder.web.api import router
+from aws_graph_builder.web.viewer_api import router as viewer_router
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -42,10 +43,11 @@ def _build_attack_subgraph(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
     return subgraph
 
 
-def create_app(document: dict[str, Any]) -> FastAPI:
+def create_app(document: dict[str, Any], *, report: dict[str, Any] | None = None) -> FastAPI:
     """Build the FastAPI app serving `document` (a graph.json-shaped dict)."""
     app = FastAPI(title="aws-graph-builder visualizer")
     app.state.document = document
+    app.state.report = report
     app.state.graph = document_to_graph(document)
     app.state.attack_graph = _build_attack_subgraph(app.state.graph)
     # Computed once at startup, same as attack_graph above -- the "keys to
@@ -59,6 +61,7 @@ def create_app(document: dict[str, Any]) -> FastAPI:
     app.state.edges_by_id = {edge["id"]: edge for edge in document["edges"]}
 
     app.include_router(router)
+    app.include_router(viewer_router)
     # Mounted last and at "/" so it only catches requests the API router
     # above didn't already handle; `html=True` serves static/index.html for "/".
     app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")

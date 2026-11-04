@@ -1,913 +1,1332 @@
-/* ---------------------------------------------------------------------
-   Theme tokens. Light values are the default; dark values apply under
-   prefers-color-scheme: dark. These custom properties are also read by
-   app.js (via getComputedStyle) for anything Cytoscape needs as a JS
-   color string (Cytoscape stylesheets can't reference CSS variables
-   directly), so keep these names in sync with app.js's THEME lookups.
-   --------------------------------------------------------------------- */
 :root {
-  --surface: #fcfcfb;
-  --ink-primary: #0b0b0b;
-  --ink-secondary: #52514e;
-  --ink-muted: #898781;
-  --border-hairline: #e1e0d9;
-  --border-ring: rgba(11, 11, 11, 0.10);
-
-  /* Node category colors (light) */
-  --cat-principal: #2a78d6;
-  --cat-policy: #008300;
-  --cat-infra: #e87ba4;
-  --cat-org: #eda100;
-
-  /* Edge severity colors -- fixed, identical in light/dark */
-  --edge-critical: #d03b3b;
-  --edge-serious: #ec835a;
-  --edge-structural: #898781;
-
-  /* Finding severity colors (critical/high/medium/low -- a distinct scale
-     from the edge-severity tiers above) -- fixed, identical in light/dark,
-     same rationale: a severity's meaning shouldn't shift with theme. */
-  --sev-critical: #d03b3b;
-  --sev-high: #ec835a;
-  --sev-medium: #e0a627;
-  --sev-low: #7a8a99;
-
-  /* Transient "focus" highlight for a selected finding's nodes/evidence
-     edges -- deliberately distinct from every category/severity color
-     above so it reads as a temporary state layered on top, not a new
-     permanent category. Fixed, identical in light/dark. */
-  --focus-highlight: #00b7c3;
-
-  /* Transient highlight for an active attack-path/reachability query
-     result -- a second "currently focused" state alongside
-     --focus-highlight above. Deliberately a different hue (violet vs
-     cyan) so the two never look identical; findings-focus and path-query
-     highlight are mutually exclusive at any given time (see app.js
-     clearAllFocus()). Fixed, identical in light/dark. */
-  --path-highlight: #8b5cf6;
-
-  /* Persistent halo for nodes where high_value === true (/api/graph).
-     Applied via Cytoscape's overlay-* properties (a soft glow behind the
-     node) rather than border-color, so it coexists with node:selected,
-     --focus-highlight, and --path-highlight -- all of which style the
-     border -- without fighting over the same visual channel. Fixed,
-     identical in light/dark. */
-  --high-value-badge: #f2b705;
+  color-scheme:light;
+  --bg:#f5f6f8;
+  --panel:#fff;
+  --canvas:#f8fafb;
+  --ink:#192831;
+  --muted:#71808b;
+  --line:#c6d2d8;
+  --border:#e5eaed;
+  --accent:#087f82;
+  --accent-soft:#e8f5f3;
+  --node-bg:#fff;
+  --purple:#8774b1;
+  --blue:#5c8eab;
+  --gold:#bd8b22;
+  --danger:#c45a56;
+  --shadow:0 12px 36px #162c4212;
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface: #1a1a19;
-    --ink-primary: #ffffff;
-    --ink-secondary: #c3c2b7;
-    --ink-muted: #898781;
-    --border-hairline: #2c2c2a;
-    --border-ring: rgba(255, 255, 255, 0.10);
-
-    --cat-principal: #3987e5;
-    --cat-policy: #008300;
-    --cat-infra: #d55181;
-    --cat-org: #c98500;
+@media(prefers-color-scheme:dark) {
+  :root:not([data-theme=light]) {
+    color-scheme:dark;
+    --bg:#111a22;
+    --panel:#18232d;
+    --canvas:#121e27;
+    --ink:#e4edf1;
+    --muted:#99aeb9;
+    --line:#48606f;
+    --border:#2c3b46;
+    --accent:#54c7bf;
+    --accent-soft:#203c40;
+    --node-bg:#1d303d;
+    --purple:#b39bd8;
+    --blue:#7bb1d0;
+    --gold:#e3b552;
+    --danger:#eb8581;
+    --shadow:0 12px 36px #0003;
   }
 }
-
-/* Explicit override hooks for a future manual theme toggle (in addition
-   to the prefers-color-scheme media query above), keyed the same way the
-   Artifact runtime convention does it: a data-theme attribute on the
-   root element wins over the OS preference in either direction. */
-:root[data-theme="dark"] {
-  --surface: #1a1a19;
-  --ink-primary: #ffffff;
-  --ink-secondary: #c3c2b7;
-  --ink-muted: #898781;
-  --border-hairline: #2c2c2a;
-  --border-ring: rgba(255, 255, 255, 0.10);
-
-  --cat-principal: #3987e5;
-  --cat-policy: #008300;
-  --cat-infra: #d55181;
-  --cat-org: #c98500;
+:root[data-theme=dark] {
+  color-scheme:dark;
+  --bg:#111a22;
+  --panel:#18232d;
+  --canvas:#121e27;
+  --ink:#e4edf1;
+  --muted:#99aeb9;
+  --line:#48606f;
+  --border:#2c3b46;
+  --accent:#54c7bf;
+  --accent-soft:#203c40;
+  --node-bg:#1d303d;
+  --purple:#b39bd8;
+  --blue:#7bb1d0;
+  --gold:#e3b552;
+  --danger:#eb8581;
+  --shadow:0 12px 36px #0003;
 }
-
-:root[data-theme="light"] {
-  --surface: #fcfcfb;
-  --ink-primary: #0b0b0b;
-  --ink-secondary: #52514e;
-  --ink-muted: #898781;
-  --border-hairline: #e1e0d9;
-  --border-ring: rgba(11, 11, 11, 0.10);
-
-  --cat-principal: #2a78d6;
-  --cat-policy: #008300;
-  --cat-infra: #e87ba4;
-  --cat-org: #eda100;
-}
-
 * {
-  box-sizing: border-box;
+  box-sizing:border-box;
 }
-
-html,
 body {
-  height: 100%;
-  margin: 0;
-  padding: 0;
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
 }
-
-body {
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  background: var(--surface);
-  color: var(--ink-primary);
+button,input,select {
+  font:inherit;
 }
-
-#app {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
+button,a,input,select,summary {
+  touch-action:manipulation;
 }
-
-/* ---------------------------------------------------------------------
-   Top bar
-   --------------------------------------------------------------------- */
-#topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.6rem 1rem;
-  border-bottom: 1px solid var(--border-hairline);
-  flex-shrink: 0;
+button {
+  cursor:pointer;
 }
-
-#topbar h1 {
-  font-size: 1rem;
-  font-weight: 600;
-  margin: 0;
-  color: var(--ink-primary);
+button:disabled {
+  cursor:default;
+  opacity:.42;
 }
-
-#topbar-controls {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,[tabindex]:focus-visible {
+  outline:2px solid var(--accent);
+  outline-offset:3px;
 }
-
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.85rem;
-  color: var(--ink-secondary);
-  cursor: pointer;
-  user-select: none;
+button {
+  color:inherit;
 }
-
-.toggle input {
-  cursor: pointer;
+button:hover:not(:disabled) {
+  filter:brightness(.96);
 }
-
-#layout-rerun-btn,
-#hide-selected-btn {
-  font-family: inherit;
-  font-size: 0.85rem;
-  color: var(--ink-primary);
-  background: transparent;
-  border: 1px solid var(--border-ring);
-  border-radius: 6px;
-  padding: 0.35rem 0.7rem;
-  cursor: pointer;
+a {
+  color:inherit;
+  text-decoration:none;
 }
-
-#layout-rerun-btn:hover,
-#hide-selected-btn:hover:not(:disabled) {
-  background: var(--border-hairline);
+[hidden] {
+  display:none!important;
 }
-
-/* "Hide selected" is disabled whenever nothing is currently selected on the
-   canvas (see app.js's updateHideSelectedBtnEnabled) -- dimmed the same way
-   the attack-path query panel's own buttons dim when inert (see
-   .pathquery-actions button:disabled). */
-#hide-selected-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+h1,h2,h3,p {
+  margin:0;
 }
-
-/* Manual theme override control -- same visual weight as #layout-rerun-btn
-   (it's another topbar action button), just with a dynamic label reflecting
-   the current mode (System/Light/Dark). See app.js's THEME_* constants. */
-#theme-toggle-btn {
-  font-family: inherit;
-  font-size: 0.85rem;
-  color: var(--ink-primary);
-  background: transparent;
-  border: 1px solid var(--border-ring);
-  border-radius: 6px;
-  padding: 0.35rem 0.7rem;
-  cursor: pointer;
+h1 {
+  font-size:21px;
+  font-weight:650;
+  letter-spacing:-.7px;
 }
-
-#theme-toggle-btn:hover {
-  background: var(--border-hairline);
+h2 {
+  font-size:14px;
 }
-
-#theme-toggle-label {
-  font-weight: 600;
-  /* Fixed-ish width so the button doesn't visibly resize/jitter as the
-     label cycles between "System" / "Light" / "Dark". */
-  display: inline-block;
-  min-width: 3.6em;
-  text-align: left;
+h3 {
+  font-size:12px;
 }
-
-/* ---------------------------------------------------------------------
-   Main layout: graph canvas + sidebar
-   --------------------------------------------------------------------- */
-#main {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  position: relative;
+.muted {
+  color:var(--muted);
 }
-
+.small {
+  font-size:11px;
+}
+.eyebrow {
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:1.4px;
+  color:var(--muted);
+}
+.sr-only {
+  position:absolute;
+  width:1px;
+  height:1px;
+  overflow:hidden;
+  clip-path:inset(50%);
+}
+.topbar {
+  height:76px;
+  display:flex;
+  align-items:center;
+  gap:28px;
+  background:var(--panel);
+  border-bottom:1px solid var(--border);
+  padding:0 24px;
+  position:relative;
+  z-index:10;
+}
+.brand {
+  display:flex;
+  gap:11px;
+  align-items:center;
+  min-width:245px;
+  font-size:14px;
+  letter-spacing:1.4px;
+}
+.brand strong {
+  font-weight:750;
+}
+.brand small {
+  display:block;
+  font-size:8px;
+  letter-spacing:2.4px;
+  color:var(--muted);
+  margin-top:3px;
+}
+.brand-mark {
+  display:grid;
+  place-items:center;
+  background:var(--ink);
+  color:var(--panel);
+  height:36px;
+  width:36px;
+  border-radius:9px;
+  font-size:28px;
+}
+.account {
+  display:grid;
+  grid-template-columns:auto auto;
+  gap:2px 12px;
+  font-family:ui-monospace,monospace;
+  font-size:12px;
+}
+.account .eyebrow {
+  grid-column:1/-1;
+  font-family:inherit;
+}
+.global-search {
+  position:relative;
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:7px;
+  padding:7px 11px;
+  width:min(350px,30vw);
+  color:var(--muted);
+}
+.global-search>span {
+  font-size:22px;
+  line-height:1;
+}
+.global-search input {
+  width:100%;
+  min-width:0;
+  border:0;
+  outline:0;
+  background:none;
+  color:var(--ink);
+  font-size:11px;
+}
+.global-search kbd {
+  font-size:10px;
+  border:1px solid var(--line);
+  border-radius:3px;
+  padding:0 5px;
+}
+.search-popup {
+  position:absolute;
+  top:calc(100% + 8px);
+  right:0;
+  width:450px;
+  max-width:85vw;
+  padding:10px;
+  background:var(--panel);
+  border:1px solid var(--border);
+  box-shadow:var(--shadow);
+  border-radius:9px;
+}
+.search-popup select {
+  width:100%;
+  border:0;
+  background:var(--panel);
+  color:var(--ink);
+  font-size:12px;
+  padding:5px;
+}
+.search-popup option {
+  padding:8px;
+}
+.search-popup button {
+  margin-top:8px;
+  width:100%;
+}
+.workspace {
+  display:flex;
+  height:calc(100dvh - 76px);
+  min-height:0;
+}
+.navigation {
+  width:292px;
+  min-width:292px;
+  background:var(--panel);
+  border-right:1px solid var(--border);
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+.nav-heading {
+  padding:24px 22px 16px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+}
+.tabs {
+  display:flex;
+  margin:0 18px;
+  border-bottom:1px solid var(--border);
+  gap:15px;
+}
+.tabs button {
+  border:0;
+  background:none;
+  padding:10px 3px 13px;
+  color:var(--muted);
+  font-size:12px;
+  border-bottom:2px solid transparent;
+}
+.tabs button.active {
+  border-bottom-color:var(--accent);
+  color:var(--accent);
+  font-weight:650;
+}
+.tabs span {
+  font-size:9px;
+}
+.nav-panel {
+  padding:22px;
+  overflow:auto;
+  flex:1;
+  min-height:0;
+  scrollbar-width:thin;
+}
+.section-heading {
+  margin-bottom:22px;
+}
+.section-heading p {
+  margin-top:7px;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.7;
+}
+.nav-footer {
+  padding:13px 22px;
+  border-top:1px solid var(--border);
+  font-size:10px;
+  color:var(--muted);
+}
+.nav-footer>span:last-child {
+  display:block;
+  font-size:9px;
+  margin-top:4px;
+  margin-left:10px;
+}
+.status-dot,.gold-dot {
+  display:inline-block;
+  border-radius:50%;
+  width:6px;
+  height:6px;
+  background:var(--accent);
+  margin-right:6px;
+}
+.gold-dot {
+  background:var(--gold);
+}
+.badge {
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  border-radius:4px;
+  font-size:9px;
+  font-weight:600;
+  line-height:1.4;
+  padding:3px 6px;
+  white-space:nowrap;
+  background:var(--accent-soft);
+  color:var(--accent);
+}
+.badge.subtle {
+  background:var(--bg);
+  color:var(--muted);
+  font-size:8px;
+  letter-spacing:.6px;
+}
+.badge.high-value {
+  background:color-mix(in srgb,var(--gold) 13%,transparent);
+  color:var(--gold);
+}
+.badge.critical {
+  background:color-mix(in srgb,var(--danger) 13%,transparent);
+  color:var(--danger);
+}
+.badge.high {
+  background:color-mix(in srgb,#b67c34 13%,transparent);
+  color:#a87129;
+}
+.badge.medium,.badge.warning {
+  background:color-mix(in srgb,var(--gold) 12%,transparent);
+  color:var(--gold);
+}
+.badge.low {
+  background:var(--bg);
+  color:var(--muted);
+}
+.field-label {
+  display:block;
+  font-size:9px;
+  letter-spacing:.8px;
+  color:var(--muted);
+  font-weight:650;
+  margin:16px 0 7px;
+}
+.input {
+  width:100%;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:9px 10px;
+  color:var(--ink);
+  font-size:11px;
+  min-height:35px;
+}
+.input::placeholder {
+  color:var(--muted);
+}
+select.input {
+  text-overflow:ellipsis;
+  overflow:hidden;
+  padding-right:18px;
+}
+.field-grid {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin:15px 0;
+}
+.field-grid label,.filter-details label {
+  font-size:10px;
+  color:var(--muted);
+}
+.field-grid .input,.filter-details .input {
+  margin-top:6px;
+}
+.filter-details {
+  margin-top:15px;
+}
+.filter-details summary {
+  color:var(--muted);
+  font-size:11px;
+  cursor:pointer;
+  padding:5px 0;
+}
+.filter-details label {
+  display:block;
+  margin-top:10px;
+}
+.list-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin:25px 0 10px;
+}
+.list-heading h2 {
+  font-size:10px;
+  letter-spacing:.4px;
+}
+.list-heading>span {
+  font-size:10px;
+}
+.entity-list {
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+}
+.entity-row {
+  width:100%;
+  display:flex;
+  gap:10px;
+  align-items:center;
+  text-align:left;
+  background:none;
+  border:1px solid transparent;
+  border-radius:7px;
+  padding:9px 8px;
+}
+.entity-row:hover {
+  background:var(--bg);
+  border-color:var(--border);
+}
+.entity-icon {
+  width:29px;
+  height:29px;
+  display:grid;
+  place-items:center;
+  background:var(--accent-soft);
+  color:var(--accent);
+  border:1px solid color-mix(in srgb,var(--accent) 15%,transparent);
+  border-radius:7px;
+  font-size:14px;
+  flex-shrink:0;
+}
+.entity-text {
+  min-width:0;
+  flex:1;
+}
+.entity-name {
+  font-size:11px;
+  font-weight:600;
+  display:block;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.entity-type {
+  font-size:9px;
+  display:block;
+  color:var(--muted);
+  margin-top:3px;
+}
+.entity-arrow {
+  color:var(--muted);
+  font-size:12px;
+}
+.entity-list .high-value-row {
+  background:color-mix(in srgb,var(--gold) 5%,transparent);
+  border-color:color-mix(in srgb,var(--gold) 15%,transparent);
+}
+.high-value-row .entity-icon {
+  color:var(--gold);
+  background:color-mix(in srgb,var(--gold) 10%,transparent);
+  border-color:transparent;
+}
+.button {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:9px 12px;
+  font-size:11px;
+  font-weight:550;
+  line-height:1.3;
+}
+.button.primary {
+  background:var(--accent);
+  color:var(--panel);
+  border-color:var(--accent);
+}
+.button.secondary {
+  background:var(--bg);
+}
+.button.wide {
+  width:100%;
+  margin-top:17px;
+}
+.button.compact {
+  padding:7px 10px;
+  font-size:10px;
+}
+.icon-button {
+  background:none;
+  border:0;
+  border-radius:5px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  padding:7px;
+  font-size:13px;
+  color:var(--muted);
+  white-space:nowrap;
+}
+.icon-button span {
+  font-size:10px;
+}
+.graph-workspace {
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+  flex:1;
+}
+.graph-toolbar {
+  padding:19px 23px;
+  background:var(--canvas);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  min-height:77px;
+  border-bottom:1px solid var(--border);
+}
+.view-context {
+  display:flex;
+  gap:13px;
+  align-items:center;
+  min-width:0;
+}
+.view-context>div {
+  min-width:0;
+}
+.view-context h2 {
+  font-size:14px;
+  font-weight:600;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+  overflow:hidden;
+  max-width:38vw;
+}
+.view-context .eyebrow {
+  font-size:8px;
+}
+.toolbar-actions {
+  display:flex;
+  align-items:center;
+  gap:5px;
+}
+.toolbar-actions .button {
+  background:transparent;
+}
+.graph-filters {
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:12px 22px;
+  background:var(--panel);
+  border-bottom:1px solid var(--border);
+  font-size:10px;
+  flex-wrap:wrap;
+}
+.graph-filters>label {
+  max-width:170px;
+  flex:1;
+  color:var(--muted);
+}
+.graph-filters .input {
+  margin-top:4px;
+  font-size:10px;
+}
+.graph-filters .check {
+  display:flex;
+  align-items:center;
+  gap:5px;
+  white-space:nowrap;
+  font-size:10px;
+  max-width:none;
+}
+.graph-filters input[type=checkbox] {
+  accent-color:var(--accent);
+}
+.canvas-area {
+  position:relative;
+  flex:1;
+  min-height:0;
+  background-color:var(--canvas);
+  background-image:radial-gradient(var(--border) .7px,transparent .7px);
+  background-size:20px 20px;
+  overflow:hidden;
+}
 #cy {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  background: var(--surface);
+  width:100%;
+  height:100%;
+  position:absolute;
+  inset:0;
+}
+.landing {
+  position:absolute;
+  inset:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  padding:30px;
+  pointer-events:none;
+}
+.landing>* {
+  pointer-events:auto;
+}
+.landing-art {
+  width:146px;
+  height:120px;
+  position:relative;
+  margin-bottom:30px;
+  display:grid;
+  place-items:center;
+}
+.landing-art>span {
+  width:62px;
+  height:62px;
+  background:var(--accent-soft);
+  border:1px solid var(--accent);
+  border-radius:17px;
+  display:grid;
+  place-items:center;
+  color:var(--accent);
+  font-size:36px;
+  box-shadow:0 0 0 12px color-mix(in srgb,var(--accent) 4%,transparent);
+}
+.landing-art i {
+  position:absolute;
+  width:14px;
+  height:14px;
+  border:1px solid var(--line);
+  background:var(--panel);
+  border-radius:4px;
+}
+.landing-art i:nth-child(1) {
+  left:0;
+  top:7px;
+}
+.landing-art i:nth-child(2) {
+  right:0;
+  top:16px;
+}
+.landing-art i:nth-child(3) {
+  left:10px;
+  bottom:0;
+}
+.landing-art i:nth-child(4) {
+  right:6px;
+  bottom:8px;
+}
+.landing h2 {
+  font-size:clamp(22px,2.5vw,35px);
+  font-weight:550;
+  line-height:1.3;
+  letter-spacing:-1.2px;
+  margin:13px 0;
+}
+.landing>p {
+  font-size:12px;
+  line-height:1.9;
+  color:var(--muted);
+}
+.landing-stats {
+  display:flex;
+  gap:0;
+  margin:29px 0 26px;
+}
+.landing-stat {
+  padding:0 25px;
+  border-right:1px solid var(--border);
+}
+.landing-stat:last-child {
+  border:0;
+}
+.landing-stat strong {
+  display:block;
+  font-size:23px;
+  font-weight:500;
+  letter-spacing:-.5px;
+}
+.landing-stat span {
+  font-size:9px;
+  color:var(--muted);
+  display:block;
+  margin-top:4px;
+}
+.landing-actions {
+  display:flex;
+  gap:10px;
+}
+.canvas-message {
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:12px;
+  background:var(--canvas);
+  color:var(--muted);
+  padding:40px;
+  text-align:center;
+}
+.canvas-message.error {
+  color:var(--danger);
+}
+.spinner {
+  width:17px;
+  height:17px;
+  border:2px solid var(--border);
+  border-top-color:var(--accent);
+  border-radius:50%;
+  animation:spin 1s linear infinite;
 }
-
-#sidebar {
-  width: 320px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border-hairline);
-  overflow-y: auto;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-#sidebar h2 {
-  font-size: 0.95rem;
-  margin: 0 0 0.5rem 0;
-  color: var(--ink-primary);
-}
-
-#sidebar h3 {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  margin: 0.75rem 0 0.35rem 0;
-  color: var(--ink-muted);
-}
-
-/* ---------------------------------------------------------------------
-   Legend
-   --------------------------------------------------------------------- */
-.legend-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.legend-list li {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-  color: var(--ink-secondary);
-}
-
-.legend-swatch {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  display: inline-block;
-}
-
-.legend-swatch.shape-ellipse {
-  border-radius: 50%;
-}
-
-.legend-swatch.shape-round-rectangle {
-  border-radius: 4px;
-}
-
-.legend-swatch.shape-rectangle {
-  border-radius: 0;
-}
-
-.legend-swatch.shape-hexagon,
-.legend-swatch.shape-triangle,
-.legend-swatch.shape-diamond,
-.legend-swatch.shape-star {
-  /* Simple approximations good enough for a legend key; exact node
-     shapes are rendered by Cytoscape itself on the canvas. */
-  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-}
-
-.legend-swatch.shape-triangle {
-  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
-}
-
-.legend-swatch.shape-diamond {
-  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
-}
-
-.legend-swatch.shape-star {
-  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
-}
-
-.legend-line {
-  flex-shrink: 0;
-  width: 22px;
-  height: 0;
-  border-top-style: solid;
-  display: inline-block;
-}
-
-/* Legend swatch/line colors, keyed to the same tokens app.js reads via
-   getComputedStyle for the actual Cytoscape node/edge styles. */
-.cat-principal {
-  background: var(--cat-principal);
-}
-
-.cat-policy {
-  background: var(--cat-policy);
-}
-
-.cat-infra {
-  background: var(--cat-infra);
-}
-
-.cat-org {
-  background: var(--cat-org);
-}
-
-/* High-value badge legend swatch -- a ring (box-shadow), not a fill, to
-   read as the same halo-behind-the-node treatment app.js applies via
-   Cytoscape overlay-* properties, rather than implying it's a 5th node
-   category color. */
-.legend-highvalue {
-  background: transparent;
-  box-shadow: 0 0 0 3px var(--high-value-badge);
-}
-
-.edge-critical {
-  border-top-color: var(--edge-critical);
-  border-top-width: 3px;
-}
-
-.edge-serious {
-  border-top-color: var(--edge-serious);
-  border-top-width: 2px;
-}
-
-.edge-structural {
-  border-top-color: var(--edge-structural);
-  border-top-width: 1px;
-  opacity: 0.7;
-}
-
-/* ---------------------------------------------------------------------
-   Findings panel
-   --------------------------------------------------------------------- */
-#findings-summary {
-  font-size: 0.78rem;
-  color: var(--ink-muted);
-  margin-bottom: 0.5rem;
-}
-
-#findings-filter {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.15rem 0.6rem;
-  font-size: 0.75rem;
-  color: var(--ink-secondary);
-  margin-bottom: 0.6rem;
-}
-
-#findings-filter label {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  cursor: pointer;
-  user-select: none;
-}
-
-#findings-filter input {
-  cursor: pointer;
-}
-
-.findings-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 280px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.finding-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.3rem 0.4rem;
-  font-size: 0.76rem;
-  padding: 0.35rem 0.4rem;
-  border: 1px solid var(--border-hairline);
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.finding-row:hover {
-  background: var(--border-hairline);
-}
-
-.finding-technique {
-  color: var(--ink-primary);
-  font-weight: 600;
-}
-
-.finding-path {
-  flex-basis: 100%;
-  color: var(--ink-secondary);
-  word-break: break-word;
-}
-
-.sev-badge {
-  display: inline-block;
-  flex-shrink: 0;
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #fff;
-  border-radius: 3px;
-  padding: 0.1rem 0.35rem;
-}
-
-.sev-badge.sev-critical {
-  background: var(--sev-critical);
-}
-
-.sev-badge.sev-high {
-  background: var(--sev-high);
-}
-
-.sev-badge.sev-medium {
-  background: var(--sev-medium);
-}
-
-.sev-badge.sev-low {
-  background: var(--sev-low);
-}
-
-/* ---------------------------------------------------------------------
-   Attack-path query panel
-   --------------------------------------------------------------------- */
-.pathquery-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-bottom: 0.6rem;
-  font-size: 0.78rem;
-}
-
-.pathquery-field > label:first-child {
-  color: var(--ink-muted);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.pathquery-radio-row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  font-size: 0.78rem;
-  color: var(--ink-secondary);
-}
-
-.pathquery-radio-row label {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  cursor: pointer;
-  user-select: none;
-}
-
-/* Disabled state for the target node-picker when "Any high-value
-   principal" is selected instead -- dims it to signal it's inert without
-   hiding it outright (keeps the layout stable). */
-.pathquery-field-disabled {
-  opacity: 0.45;
-  pointer-events: none;
-}
-
-/* Mode radio dimmed when "Any high-value principal" target forces +
-   locks Attack path mode (the target=high_value sentinel only has
-   server-side meaning for /api/attack-paths -- see app.js). */
-.pathquery-radio-disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.pathquery-hops-field {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.pathquery-hops-field label {
-  color: var(--ink-muted);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-#pathquery-maxhops-input {
-  width: 4rem;
-}
-
-.node-picker {
-  position: relative;
-}
-
-.node-picker input[type="text"] {
-  width: 100%;
-  font-family: inherit;
-  font-size: 0.8rem;
-  color: var(--ink-primary);
-  background: var(--surface);
-  border: 1px solid var(--border-ring);
-  border-radius: 5px;
-  padding: 0.3rem 0.5rem;
-}
-
-.node-picker input[type="text"]:disabled {
-  cursor: not-allowed;
-}
-
-.node-picker-suggestions {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  right: 0;
-  z-index: 30;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  max-height: 200px;
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--border-hairline);
-  border-radius: 5px;
-  box-shadow: 0 4px 12px var(--border-ring);
-}
-
-.node-picker-suggestion {
-  padding: 0.3rem 0.5rem;
-  font-size: 0.78rem;
-  color: var(--ink-primary);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.node-picker-suggestion:hover,
-.node-picker-suggestion.node-picker-suggestion-active {
-  background: var(--border-hairline);
-}
-
-.node-picker-suggestion-type {
-  color: var(--ink-muted);
-  font-size: 0.7rem;
-  margin-left: 0.3rem;
-}
-
-.node-picker-empty {
-  padding: 0.3rem 0.5rem;
-  font-size: 0.78rem;
-  color: var(--ink-muted);
-}
-
-.pathquery-actions {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.6rem;
-}
-
-.pathquery-actions button {
-  font-family: inherit;
-  font-size: 0.8rem;
-  color: var(--ink-primary);
-  background: transparent;
-  border: 1px solid var(--border-ring);
-  border-radius: 6px;
-  padding: 0.3rem 0.6rem;
-  cursor: pointer;
-}
-
-.pathquery-actions button:hover:not(:disabled) {
-  background: var(--border-hairline);
-}
-
-.pathquery-actions button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-#pathquery-status {
-  font-size: 0.78rem;
-  color: var(--ink-muted);
-  min-height: 1.1em;
-}
-
-#pathquery-status.pathquery-status-error {
-  color: var(--edge-critical);
-}
-
-#pathquery-status.pathquery-status-success {
-  color: var(--ink-secondary);
-}
-
-/* ---------------------------------------------------------------------
-   Hidden Nodes panel -- user-driven per-node hide/show (see app.js's
-   hideNodes/showHiddenNode/showAllHiddenNodes and userHiddenNodeIds).
-   Deliberately styled to echo the findings panel above (same summary-row +
-   scrollable-list shape) since it's the same kind of "here's a list of
-   things, act on one" UI, just for manually-hidden nodes instead of
-   detected findings.
-   --------------------------------------------------------------------- */
-#hidden-nodes-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.78rem;
-  color: var(--ink-muted);
-  margin-bottom: 0.5rem;
-}
-
-#hidden-nodes-showall-btn {
-  font-family: inherit;
-  font-size: 0.78rem;
-  color: var(--ink-primary);
-  background: transparent;
-  border: 1px solid var(--border-ring);
-  border-radius: 6px;
-  padding: 0.2rem 0.55rem;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-#hidden-nodes-showall-btn:hover:not(:disabled) {
-  background: var(--border-hairline);
-}
-
-#hidden-nodes-showall-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.hidden-nodes-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 200px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.hidden-node-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
-  font-size: 0.76rem;
-  padding: 0.35rem 0.4rem;
-  border: 1px solid var(--border-hairline);
-  border-radius: 5px;
-}
-
-.hidden-node-name {
-  color: var(--ink-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.hidden-node-type {
-  color: var(--ink-muted);
-  font-size: 0.7rem;
-  margin-left: 0.4rem;
-}
-
-.hidden-node-show-btn {
-  font-family: inherit;
-  font-size: 0.72rem;
-  color: var(--ink-primary);
-  background: transparent;
-  border: 1px solid var(--border-ring);
-  border-radius: 5px;
-  padding: 0.15rem 0.5rem;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.hidden-node-show-btn:hover {
-  background: var(--border-hairline);
-}
-
-.hidden-nodes-empty {
-  font-size: 0.78rem;
-  color: var(--ink-muted);
-}
-
-/* ---------------------------------------------------------------------
-   Inspector panel
-   --------------------------------------------------------------------- */
-/* No explicit `display` here (a <button> is inline-block by default, which
-   is enough for margin-bottom below to work) -- deliberately, per the
-   #loading-overlay/#error-overlay comment above: an author `display` value
-   on this same selector would beat the UA stylesheet's `[hidden] { display:
-   none }` rule on specificity, leaving the button visible even while its
-   `hidden` attribute is set (app.js toggles `inspectorHideNodeBtn.hidden`
-   directly, not a class). */
-#inspector-hide-node-btn {
-  font-family: inherit;
-  font-size: 0.78rem;
-  color: var(--ink-primary);
-  background: transparent;
-  border: 1px solid var(--border-ring);
-  border-radius: 6px;
-  padding: 0.3rem 0.6rem;
-  cursor: pointer;
-  margin-bottom: 0.6rem;
-}
-
-#inspector-hide-node-btn:hover {
-  background: var(--border-hairline);
-}
-
-#inspector-content {
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-.inspector-empty {
-  font-size: 0.8rem;
-  color: var(--ink-muted);
-}
-
-#inspector-content dl {
-  margin: 0;
-  font-size: 0.8rem;
-}
-
-#inspector-content dt {
-  color: var(--ink-muted);
-  margin-top: 0.6rem;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-#inspector-content dd {
-  margin: 0.15rem 0 0 0;
-  color: var(--ink-primary);
-  word-break: break-all;
-}
-
-#inspector-content h3 {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--ink-muted);
-  margin: 0.85rem 0 0.35rem 0;
-}
-
-.inspector-value-list {
-  margin: 0;
-  padding-left: 1.1rem;
-  word-break: break-all;
-}
-
-.inspector-properties-status {
-  font-size: 0.78rem;
-  color: var(--ink-muted);
-}
-
-.inspector-properties-error {
-  color: var(--edge-critical);
-}
-
-/* Full node/edge `properties` blob -- can be a large nested policy
-   document or raw API response fragment, so this wraps long strings
-   instead of letting them overflow the 320px sidebar horizontally, with
-   overflow-x as a belt-and-braces fallback for anything word-break can't
-   break on. Vertical growth is bounded by #inspector-content's own scroll
-   above, so a big blob doesn't blow out the page layout. */
-.inspector-properties {
-  margin: 0.35rem 0 0 0;
-  padding: 0.5rem;
-  background: var(--border-hairline);
-  border-radius: 4px;
-  font-size: 0.72rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-x: auto;
-}
-
-#inspector-kind-badge {
-  display: inline-block;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--ink-muted);
-  border: 1px solid var(--border-ring);
-  border-radius: 4px;
-  padding: 0.1rem 0.4rem;
-}
-
-/* ---------------------------------------------------------------------
-   Loading / error overlays
-   --------------------------------------------------------------------- */
-#loading-overlay,
-#error-overlay {
-  position: absolute;
-  inset: 0;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  background: var(--surface);
-  z-index: 10;
-}
-
-/* `display: flex` must only apply while NOT [hidden] -- author styles
-   otherwise beat the UA stylesheet's `[hidden] { display: none }` rule,
-   which would leave the overlay visually covering the whole graph +
-   sidebar even after JS sets the `hidden` property to true. */
-#loading-overlay:not([hidden]),
-#error-overlay:not([hidden]) {
-  display: flex;
-}
-
-#loading-text,
-#error-text {
-  font-size: 0.85rem;
-  color: var(--ink-secondary);
-}
-
-#error-text {
-  color: var(--edge-critical);
-  max-width: 30rem;
-  text-align: center;
-  padding: 0 1rem;
-}
-
-#loading-spinner {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 3px solid var(--border-hairline);
-  border-top-color: var(--cat-principal);
-  animation: spin 0.8s linear infinite;
-}
-
 @keyframes spin {
   to {
-    transform: rotate(360deg);
+    transform:rotate(360deg);
   }
 }
-
-/* ---------------------------------------------------------------------
-   Cytoscape hover tooltip (edge/node type on hover, per spec -- edge
-   labels are never permanently rendered on-canvas at this density)
-   --------------------------------------------------------------------- */
-#hover-tooltip {
-  position: absolute;
-  pointer-events: none;
-  background: var(--surface);
-  color: var(--ink-primary);
-  border: 1px solid var(--border-ring);
-  border-radius: 4px;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  box-shadow: 0 2px 8px var(--border-ring);
-  z-index: 20;
-  display: none;
-  white-space: nowrap;
+.focus-note {
+  position:absolute;
+  top:18px;
+  left:50%;
+  transform:translateX(-50%);
+  font-size:10px;
+  background:var(--panel);
+  border:1px solid var(--border);
+  box-shadow:var(--shadow);
+  border-radius:20px;
+  padding:7px 13px;
+  max-width:90%;
+  text-align:center;
+  color:var(--muted);
+}
+.legend {
+  position:absolute;
+  bottom:19px;
+  left:20px;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:7px;
+  box-shadow:var(--shadow);
+  font-size:10px;
+  color:var(--muted);
+  padding:9px 12px;
+  max-width:90%;
+}
+.legend summary {
+  cursor:pointer;
+  font-size:10px;
+}
+.legend div {
+  margin-top:9px;
+  display:flex;
+  gap:6px;
+  align-items:center;
+}
+.legend-dot {
+  width:7px;
+  height:7px;
+  border:1.5px solid var(--accent);
+  border-radius:50%;
+  display:inline-block;
+  margin-left:6px;
+}
+.legend-dot.policy {
+  border-color:var(--purple);
+  border-radius:2px;
+}
+.legend-dot.resource {
+  border-color:var(--blue);
+  border-radius:2px;
+}
+.legend-line {
+  width:18px;
+  border-top:2px solid var(--line);
+  display:inline-block;
+}
+.legend-line.attack {
+  border-color:var(--danger);
+}
+.legend-line.assume {
+  border-color:var(--accent);
+}
+.legend-line.uncertain {
+  border-style:dashed;
+}
+.graph-status {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  min-height:36px;
+  font-size:9px;
+  padding:6px 20px;
+  border-top:1px solid var(--border);
+  background:var(--panel);
+  color:var(--muted);
+}
+.graph-status button {
+  font-size:9px;
+  padding:2px 5px;
+}
+.finding-list,.route-list {
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+}
+.finding-list>h3 {
+  margin:18px 0 5px;
+  color:var(--muted);
+  font-size:10px;
+  overflow-wrap:anywhere;
+}
+.finding-card,.route-card {
+  display:block;
+  width:100%;
+  text-align:left;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:7px;
+  padding:12px;
+}
+.finding-card:hover,.route-card:hover {
+  border-color:var(--accent);
+}
+.finding-card strong {
+  display:block;
+  font-size:11px;
+  margin:8px 0 5px;
+}
+.finding-card p,.route-card p {
+  font-size:10px;
+  color:var(--muted);
+  overflow-wrap:anywhere;
+}
+.finding-card .path-name {
+  margin-top:4px;
+  font-size:11px;
+}
+.route-connector {
+  height:24px;
+  color:var(--line);
+  font-size:20px;
+  text-align:center;
+}
+.route-card.active {
+  border-color:var(--accent);
+  background:var(--accent-soft);
+}
+.route-card strong {
+  font-size:11px;
+}
+.route-card p {
+  margin-top:6px;
+}
+.route-card .badge {
+  float:right;
+}
+.message {
+  padding:12px 0;
+  color:var(--muted);
+  font-size:11px;
+  overflow-wrap:anywhere;
+}
+.message.error,.error {
+  color:var(--danger);
+}
+.notice {
+  padding:11px 12px;
+  background:var(--accent-soft);
+  border:1px solid color-mix(in srgb,var(--accent) 15%,transparent);
+  border-radius:6px;
+  font-size:11px;
+  color:var(--accent);
+  margin:12px 0;
+}
+.notice.warning {
+  background:color-mix(in srgb,var(--gold) 9%,transparent);
+  color:var(--gold);
+  border-color:color-mix(in srgb,var(--gold) 20%,transparent);
+}
+.inspector {
+  position:relative;
+  width:340px;
+  min-width:280px;
+  max-width:48vw;
+  background:var(--panel);
+  border-left:1px solid var(--border);
+  overflow-y:auto;
+  scrollbar-width:thin;
+}
+.resize-handle {
+  position:absolute;
+  left:0;
+  top:0;
+  bottom:0;
+  width:5px;
+  cursor:col-resize;
+  z-index:2;
+}
+.resize-handle:hover {
+  background:var(--accent);
+}
+.inspector-top {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:18px 22px;
+  border-bottom:1px solid var(--border);
+}
+#inspector-content {
+  padding:22px;
+}
+.inspector-hero .entity-icon {
+  width:43px;
+  height:43px;
+  font-size:22px;
+  margin-bottom:16px;
+}
+.inspector-hero h2 {
+  font-size:20px;
+  line-height:1.4;
+  letter-spacing:-.5px;
+  overflow-wrap:anywhere;
+  margin:8px 0;
+}
+.inspector-hero p {
+  color:var(--muted);
+  font-size:11px;
+}
+.inspector-hero .badges {
+  display:flex;
+  gap:5px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+.inspector-actions {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:7px;
+  margin:21px 0;
+}
+.inspector-actions .button {
+  font-size:10px;
+}
+.inspector-tabs {
+  display:flex;
+  border-bottom:1px solid var(--border);
+  gap:19px;
+  margin-top:20px;
+}
+.inspector-tabs button {
+  background:none;
+  border:0;
+  border-bottom:2px solid transparent;
+  padding:9px 0;
+  color:var(--muted);
+  font-size:11px;
+}
+.inspector-tabs button.active {
+  color:var(--accent);
+  border-color:var(--accent);
+}
+.detail-field {
+  margin:15px 0;
+}
+.detail-field dt {
+  font-size:9px;
+  text-transform:uppercase;
+  letter-spacing:.8px;
+  color:var(--muted);
+  margin-bottom:6px;
+}
+.detail-field dd {
+  margin:0;
+  font-size:11px;
+  overflow-wrap:anywhere;
+}
+.detail-section {
+  margin-top:22px;
+}
+.detail-section>h3 {
+  font-size:10px;
+  letter-spacing:.5px;
+  margin-bottom:9px;
+}
+.json-block {
+  background:var(--bg);
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:6px;
+  font:10px/1.7 ui-monospace,monospace;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  max-height:500px;
+  overflow:auto;
+}
+.evidence-button,.hop-button {
+  display:block;
+  width:100%;
+  text-align:left;
+  padding:11px 12px;
+  border:1px solid var(--border);
+  background:var(--panel);
+  border-radius:6px;
+  font-size:11px;
+  margin:7px 0;
+}
+.evidence-button small,.hop-button small {
+  display:block;
+  font-size:10px;
+  color:var(--muted);
+  margin-top:3px;
+}
+.property-row {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  font-size:11px;
+  padding:8px 0;
+  border-bottom:1px solid var(--border);
+}
+.property-row span:first-child {
+  color:var(--muted);
+}
+.property-row span:last-child {
+  overflow-wrap:anywhere;
+  min-width:0;
+}
+.inspector-node-list {
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+  margin-top:15px;
+}
+dialog {
+  color:var(--ink);
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:25px;
+  max-width:540px;
+  width:90vw;
+  box-shadow:var(--shadow);
+}
+dialog::backdrop {
+  background:#0a192944;
+  backdrop-filter:blur(3px);
+}
+.dialog-heading {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:14px;
+}
+.dialog-heading h2 {
+  font-size:19px;
+  margin-top:5px;
+}
+.dialog-footer {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:15px;
+  padding-top:15px;
+  border-top:1px solid var(--border);
+}
+dialog>p {
+  font-size:12px;
+  margin-bottom:15px;
+}
+.expansion-list {
+  max-height:40vh;
+  overflow:auto;
+  padding:10px 0;
+}
+.expansion-row {
+  display:flex;
+  gap:10px;
+  align-items:center;
+  padding:9px;
+  border-radius:5px;
+  cursor:pointer;
+}
+.expansion-row:hover {
+  background:var(--bg);
+}
+.expansion-row span {
+  min-width:0;
+  overflow-wrap:anywhere;
+  font-size:12px;
+}
+.expansion-row small {
+  display:block;
+  color:var(--muted);
+  font-size:10px;
+}
+.mobile-only {
+  display:none;
+}
+@media(min-width:1600px) {
+  .navigation {
+    width:320px;
+    min-width:320px;
+  }
+  .nav-panel {
+    padding:26px;
+  }
+  .topbar {
+    gap:38px;
+  }
+  .inspector {
+    width:370px;
+  }
+}
+@media(max-width:1150px) {
+  .account .badge {
+    display:none;
+  }
+  .topbar {
+    gap:15px;
+    padding:0 17px;
+  }
+  .brand {
+    min-width:200px;
+  }
+  .navigation {
+    width:260px;
+    min-width:260px;
+  }
+  .nav-panel {
+    padding:18px;
+  }
+  .graph-toolbar {
+    padding:15px;
+  }
+  .toolbar-actions {
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
+  .graph-status>span:last-child {
+    display:none;
+  }
+  .inspector {
+    width:300px;
+    min-width:260px;
+  }
+  .view-context h2 {
+    max-width:25vw;
+  }
+}
+@media(max-width:900px) {
+  .account {
+    display:none;
+  }
+  .global-search {
+    width:auto;
+    flex:1;
+  }
+  .inspector {
+    position:fixed;
+    right:0;
+    top:76px;
+    bottom:0;
+    z-index:20;
+    width:360px;
+    max-width:90vw;
+    box-shadow:var(--shadow);
+  }
+  .landing-stat {
+    padding:0 16px;
+  }
+  .landing h2 {
+    font-size:27px;
+  }
+  .graph-toolbar {
+    min-height:85px;
+  }
+  .view-context h2 {
+    max-width:30vw;
+  }
+}
+@media(max-width:680px) {
+  .topbar {
+    height:64px;
+    padding:0 10px;
+    gap:7px;
+  }
+  .brand {
+    min-width:0;
+  }
+  .brand>span:last-child {
+    display:none;
+  }
+  .brand-mark {
+    height:30px;
+    width:30px;
+    font-size:22px;
+  }
+  .mobile-only {
+    display:inline-flex;
+  }
+  .global-search {
+    margin-left:4px;
+  }
+  .global-search input {
+    font-size:10px;
+  }
+  .global-search kbd,#theme-name {
+    display:none;
+  }
+  .workspace {
+    height:calc(100dvh - 64px);
+  }
+  .navigation {
+    position:fixed;
+    z-index:15;
+    top:64px;
+    bottom:0;
+    left:0;
+    width:290px;
+    box-shadow:var(--shadow);
+    transform:translateX(-105%);
+    transition:transform .15s ease;
+  }
+  .nav-open .navigation {
+    transform:translateX(0);
+  }
+  .inspector {
+    top:64px;
+  }
+  .graph-toolbar {
+    align-items:flex-start;
+    padding:13px;
+    gap:8px;
+  }
+  .toolbar-actions {
+    max-width:210px;
+  }
+  .view-context {
+    gap:3px;
+  }
+  .view-context h2 {
+    max-width:30vw;
+    font-size:12px;
+  }
+  .toolbar-actions .button {
+    padding:6px 8px;
+    font-size:9px;
+  }
+  .landing {
+    padding:20px;
+  }
+  .landing h2 {
+    font-size:27px;
+  }
+  .landing-art {
+    margin-bottom:20px;
+  }
+  .landing-stats {
+    margin:25px 0;
+  }
+  .landing-stat {
+    padding:0 15px;
+  }
+  .landing-stat strong {
+    font-size:21px;
+  }
+  .landing .eyebrow {
+    font-size:8px;
+  }
+  .graph-status {
+    padding:6px 10px;
+  }
+  .legend {
+    bottom:12px;
+    left:12px;
+  }
+  .focus-note {
+    top:10px;
+    font-size:9px;
+    width:max-content;
+  }
+  .resize-handle {
+    display:none;
+  }
+  .graph-filters {
+    gap:8px;
+    padding:10px;
+  }
+  .desktop-only {
+    display:none;
+  }
+}
+@media(prefers-reduced-motion:reduce) {
+  *,*::before,*::after {
+    animation:none!important;
+    transition:none!important;
+  }
+}
+button.badge {
+  border:1px solid var(--border);
+  font-family:inherit;
+  cursor:pointer;
 }

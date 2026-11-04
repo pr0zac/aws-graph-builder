@@ -74,10 +74,21 @@ Tracks implementation progress against the phased build order in `aws-graph-buil
 - [x] `web/api.py` — `GET /api/graph` (trimmed nodes/edges for render), `/api/node`/`/api/edge` (full detail on demand), `/api/findings`, `/api/paths?source=&target=&max_hops=` (general reachability, any edge type, capped 10 hops/200 paths), `/api/attack-paths?source=&target=&max_hops=` (same, restricted to the control-transfer subgraph), plus a `target=high_value` sentinel merging paths to every high-value principal into one capped response
 - [x] `eval/high_value.py` — `find_high_value_principals()`: flags `IamUser`/`IamRole` nodes with an `EffectivePermission` edge granting `resource_pattern == "*"` plus an action pattern matching `"*"` or `"iam:*"` (full IAM control counts — lets a principal grant itself anything else via `attach_policy`); exposed as a `high_value` field on `/api/graph`/`/api/node` and via `GET /api/high-value-principals`
 - [x] Frontend (`web/static/{index.html,app.js,style.css}`, vanilla JS + vendored Cytoscape.js, no build step/CDN): graph render (14 node types by color/shape, 3-tier edge severity styling, `EffectivePermission` hidden by default), legend, findings panel (severity-filterable, click-to-highlight-and-focus with a pulsing style-bypass), node/edge inspector (click for full detail incl. raw properties), light/dark theme support
-- [ ] Frontend attack-path query UI (source/target picker, general-reachability vs. attack-path mode, canned "path to any high-value principal") and a visual high-value badge on graph nodes — not yet implemented as of this entry; `/api/paths`/`/api/attack-paths`/`/api/high-value-principals` are fully API-complete and tested, `app.js` just doesn't have controls for them yet
+- [x] Frontend attack-path queries and high-value indicators; superseded by the investigation workspace rewrite below.
 - [x] New deps: `fastapi`, `uvicorn[standard]` (runtime), `httpx` (dev, for FastAPI's `TestClient`)
 - [x] Tests: 29 new (`tests/web/test_api.py` 13, `tests/web/test_high_value_api.py` 10, `tests/eval/test_high_value.py` 6), full suite 257/257 passing
 - [x] Verified against the real Cloudfoxable-derived `graph.json` (96 nodes / 2195 edges / 120 findings): `serve` started the server, `/api/graph` returned all 96 nodes with exactly one `high_value: true` (the SSO `AWSReservedSSO_AdministratorAccess` role), `/api/high-value-principals` matched, `/api/findings` returned all 120, `/api/attack-paths?target=high_value` from that same admin role correctly returned zero paths (source is itself the high-value principal — matches documented sentinel behavior), and `/` served the static frontend (200 OK)
 
 ## Deferred (not v1)
 - [ ] Phase 2 (network): SecurityGroup/Vpc/Subnet/NetworkInterface/LoadBalancer/RouteTable/InternetGateway nodes, AllowsIngress/AllowsEgress/Routes/ExposesToInternet edges
+
+## Viewer redesign — investigation workspace
+
+- [x] Principal-first Explore, global search, account overview, selected neighborhood expansion, visibility controls, and high-value shortcuts.
+- [x] Grouped/filterable findings, either-endpoint related findings, focused evidence, readable permission/trust detail, originating policy links/statements, and raw JSON.
+- [x] Unique shortest-first routes, parallel technique alternatives, individual hop inspection, optional combined view, and explicit search-limit states.
+- [x] Separate inspection from graph focus; history restores graph positions, viewport, workspace, and route query/results. Superseded requests are cancelled/ignored.
+- [x] Responsive panels, resizable inspector, keyboard search/actions, static highlights, and persisted System/Light/Dark themes.
+- [x] Additive viewer/route APIs, unchanged legacy APIs, optional report coverage, and bounded breadth-first route traversal.
+- [x] Backend, frontend-model, and real Chromium tests using fictional fixtures; optional live-artifact smoke test; bundled-module wheel verification.
+- [x] Final verification: 269 Python tests, 10 explicit Chromium tests (including live artifact), 7 Node model tests; Ruff/mypy and wheel build/asset serving passed. Per-call high-value matching cache cut measured live graph load/classification from ~39s to ~0.63s without changing results.
